@@ -806,6 +806,694 @@ class SongHandler(AbletonOSCHandler):
         self.osc_server.add_handler("/live/song/start_listen/beat", start_beat_listener)
         self.osc_server.add_handler("/live/song/stop_listen/beat", stop_beat_listener)
 
+        #--------------------------------------------------------------------------------
+        # Browser and plugin handling
+        #--------------------------------------------------------------------------------
+        def browser_list_all_plugins(params):
+            """
+            Lists all available plugins/devices in the Ableton browser.
+            
+            Returns:
+                count (int): Number of plugins found
+                plugins (str): JSON string with plugin details
+            """
+            try:
+                browser = self.song.application.browser
+                
+                # The browser has different filter categories
+                all_plugins = []
+                
+                # Go through all device categories
+                if hasattr(browser, "devices") and browser.devices:
+                    for category in browser.devices.children:
+                        category_name = category.name
+                        
+                        # For each category, get all devices
+                        for device in category.children:
+                            plugin_info = {
+                                "name": device.name,
+                                "category": category_name,
+                                "is_loadable": device.is_loadable,
+                                "is_instrument": hasattr(device, "is_instrument") and device.is_instrument,
+                                "is_effect": hasattr(device, "is_effect") and device.is_effect,
+                                "is_plugin": hasattr(device, "is_plugin") and device.is_plugin,
+                                "path": device.path if hasattr(device, "path") else ""
+                            }
+                            all_plugins.append(plugin_info)
+                
+                return (len(all_plugins), json.dumps(all_plugins))
+                
+            except Exception as e:
+                self.logger.error(f"Error listing plugins: {str(e)}")
+                return (0, f"Error listing plugins: {str(e)}")
+        
+        self.osc_server.add_handler("/live/browser/list_plugins", browser_list_all_plugins)
+        
+        def browser_list_vst_plugins(params):
+            """
+            Lists all available VST/AU plugins in the Ableton browser.
+            
+            Returns:
+                count (int): Number of plugins found
+                plugins (str): JSON string with plugin details
+            """
+            try:
+                browser = self.song.application.browser
+                
+                # The browser has different filter categories
+                vst_plugins = []
+                
+                # Get VST plugins specifically
+                if hasattr(browser, "plugs") and browser.plugs:
+                    # Access VST plugins
+                    for plugin_category in browser.plugs.children:
+                        if plugin_category.name in ["Plug-ins", "VST", "VST3", "Audio Units"]:
+                            for plugin in plugin_category.children:
+                                plugin_info = {
+                                    "name": plugin.name,
+                                    "category": plugin_category.name,
+                                    "is_loadable": plugin.is_loadable,
+                                    "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
+                                    "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                    "is_plugin": True,
+                                    "format": plugin_category.name,
+                                    "path": plugin.path if hasattr(plugin, "path") else ""
+                                }
+                                vst_plugins.append(plugin_info)
+                
+                # Fallback method: try other plugin categories
+                if not vst_plugins:
+                    # Try through the "plugins" property if available
+                    if hasattr(browser, "plugins") and browser.plugins:
+                        for plugin in browser.plugins.children:
+                            plugin_info = {
+                                "name": plugin.name,
+                                "category": "VST/AU Plugin",
+                                "is_loadable": plugin.is_loadable,
+                                "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
+                                "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                "is_plugin": True,
+                                "path": plugin.path if hasattr(plugin, "path") else ""
+                            }
+                            vst_plugins.append(plugin_info)
+                    
+                    # Look in devices for VST references
+                    if hasattr(browser, "devices") and browser.devices:
+                        for category in browser.devices.children:
+                            if "VST" in category.name or "Plug-in" in category.name:
+                                for device in category.children:
+                                    plugin_info = {
+                                        "name": device.name,
+                                        "category": category.name,
+                                        "is_loadable": device.is_loadable,
+                                        "is_instrument": hasattr(device, "is_instrument") and device.is_instrument,
+                                        "is_effect": hasattr(device, "is_effect") and device.is_effect,
+                                        "is_plugin": True,
+                                        "path": device.path if hasattr(device, "path") else ""
+                                    }
+                                    vst_plugins.append(plugin_info)
+                
+                return (len(vst_plugins), json.dumps(vst_plugins))
+                
+            except Exception as e:
+                self.logger.error(f"Error listing VST plugins: {str(e)}")
+                return (0, f"Error listing VST plugins: {str(e)}")
+        
+        self.osc_server.add_handler("/live/browser/list_vst_plugins", browser_list_vst_plugins)
+        
+        def browser_list_audio_effects(params):
+            """
+            Lists all available audio effects in the Ableton browser.
+            
+            Returns:
+                count (int): Number of effects found
+                effects (str): JSON string with effect details
+            """
+            try:
+                browser = self.song.application.browser
+                
+                # The browser has different filter categories
+                audio_effects = []
+                
+                # Go through all device categories
+                if hasattr(browser, "devices") and browser.devices:
+                    for category in browser.devices.children:
+                        # Skip instrument categories
+                        if "Instrument" in category.name:
+                            continue
+                            
+                        category_name = category.name
+                        
+                        # For each category, get all audio effect devices
+                        for device in category.children:
+                            if not (hasattr(device, "is_instrument") and device.is_instrument):
+                                # This is likely an audio effect
+                                effect_info = {
+                                    "name": device.name,
+                                    "category": category_name,
+                                    "is_loadable": device.is_loadable,
+                                    "is_effect": hasattr(device, "is_effect") and device.is_effect,
+                                    "is_plugin": hasattr(device, "is_plugin") and device.is_plugin,
+                                    "path": device.path if hasattr(device, "path") else ""
+                                }
+                                audio_effects.append(effect_info)
+                
+                # Add VST/AU effects too
+                if hasattr(browser, "plugs") and browser.plugs:
+                    for plugin_category in browser.plugs.children:
+                        if plugin_category.name in ["Plug-ins", "VST", "VST3", "Audio Units"]:
+                            for plugin in plugin_category.children:
+                                if not (hasattr(plugin, "is_instrument") and plugin.is_instrument):
+                                    effect_info = {
+                                        "name": plugin.name,
+                                        "category": f"{plugin_category.name} Effect",
+                                        "is_loadable": plugin.is_loadable,
+                                        "is_effect": True,
+                                        "is_plugin": True,
+                                        "format": plugin_category.name,
+                                        "path": plugin.path if hasattr(plugin, "path") else ""
+                                    }
+                                    audio_effects.append(effect_info)
+                
+                return (len(audio_effects), json.dumps(audio_effects))
+                
+            except Exception as e:
+                self.logger.error(f"Error listing audio effects: {str(e)}")
+                return (0, f"Error listing audio effects: {str(e)}")
+        
+        self.osc_server.add_handler("/live/browser/list_audio_effects", browser_list_audio_effects)
+        
+        def browser_list_instruments(params):
+            """
+            Lists all available instruments in the Ableton browser.
+            
+            Returns:
+                count (int): Number of instruments found
+                instruments (str): JSON string with instrument details
+            """
+            try:
+                browser = self.song.application.browser
+                
+                # The browser has different filter categories
+                instruments = []
+                
+                # Go through all device categories
+                if hasattr(browser, "devices") and browser.devices:
+                    for category in browser.devices.children:
+                        # Focus on instrument categories but don't skip others
+                        # as some may have instruments
+                        category_name = category.name
+                        
+                        # For each category, get all instrument devices
+                        for device in category.children:
+                            if hasattr(device, "is_instrument") and device.is_instrument:
+                                instrument_info = {
+                                    "name": device.name,
+                                    "category": category_name,
+                                    "is_loadable": device.is_loadable,
+                                    "is_instrument": True,
+                                    "is_plugin": hasattr(device, "is_plugin") and device.is_plugin,
+                                    "path": device.path if hasattr(device, "path") else ""
+                                }
+                                instruments.append(instrument_info)
+                
+                # Add VST/AU instruments too
+                if hasattr(browser, "plugs") and browser.plugs:
+                    for plugin_category in browser.plugs.children:
+                        if plugin_category.name in ["Plug-ins", "VST", "VST3", "Audio Units"]:
+                            for plugin in plugin_category.children:
+                                if hasattr(plugin, "is_instrument") and plugin.is_instrument:
+                                    instrument_info = {
+                                        "name": plugin.name,
+                                        "category": f"{plugin_category.name} Instrument",
+                                        "is_loadable": plugin.is_loadable,
+                                        "is_instrument": True,
+                                        "is_plugin": True,
+                                        "format": plugin_category.name,
+                                        "path": plugin.path if hasattr(plugin, "path") else ""
+                                    }
+                                    instruments.append(instrument_info)
+                
+                return (len(instruments), json.dumps(instruments))
+                
+            except Exception as e:
+                self.logger.error(f"Error listing instruments: {str(e)}")
+                return (0, f"Error listing instruments: {str(e)}")
+        
+        self.osc_server.add_handler("/live/browser/list_instruments", browser_list_instruments)
+        
+        def browser_search_devices(params):
+            """
+            Search for devices/plugins in the browser by name.
+            
+            Args:
+                query (str): Search term
+                type (str, optional): "all", "instrument", "effect", or "plugin" (default: "all")
+                
+            Returns:
+                count (int): Number of matching devices found
+                devices (str): JSON string with device details
+            """
+            query = str(params[0]).lower()
+            device_type = str(params[1]).lower() if len(params) > 1 else "all"
+            
+            try:
+                # Get the appropriate device list based on type
+                if device_type == "instrument":
+                    count, devices_json = browser_list_instruments([])
+                elif device_type == "effect":
+                    count, devices_json = browser_list_audio_effects([])
+                elif device_type == "plugin":
+                    count, devices_json = browser_list_vst_plugins([])
+                else:  # all
+                    count, devices_json = browser_list_all_plugins([])
+                
+                # Parse the JSON
+                devices = json.loads(devices_json)
+                
+                # Filter by search query
+                matching_devices = [
+                    device for device in devices 
+                    if query in device["name"].lower() or 
+                       query in device.get("category", "").lower()
+                ]
+                
+                return (len(matching_devices), json.dumps(matching_devices))
+                
+            except Exception as e:
+                self.logger.error(f"Error searching devices: {str(e)}")
+                return (0, f"Error searching devices: {str(e)}")
+        
+        self.osc_server.add_handler("/live/browser/search_devices", browser_search_devices)
+
+        #--------------------------------------------------------------------------------
+        # Track device handling
+        #--------------------------------------------------------------------------------
+        def track_list_devices(params):
+            """
+            Lists all devices on a specific track.
+            
+            Args:
+                track_index (int): Index of the track
+                
+            Returns:
+                count (int): Number of devices found
+                devices (str): JSON string with device details
+            """
+            track_index = int(params[0])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                devices = []
+                
+                for i, device in enumerate(track.devices):
+                    device_info = {
+                        "index": i,
+                        "name": device.name,
+                        "class_name": device.class_name if hasattr(device, "class_name") else "",
+                        "type": device.type if hasattr(device, "type") else "",
+                        "is_active": device.is_active if hasattr(device, "is_active") else True,
+                        "can_have_chains": device.can_have_chains if hasattr(device, "can_have_chains") else False,
+                        "parameters": []
+                    }
+                    
+                    # Get all parameters
+                    for param in device.parameters:
+                        param_info = {
+                            "name": param.name,
+                            "value": param.value,
+                            "min": param.min,
+                            "max": param.max,
+                            "is_quantized": param.is_quantized,
+                            "is_automated": param.automation_state != 0 if hasattr(param, "automation_state") else False,
+                        }
+                        device_info["parameters"].append(param_info)
+                    
+                    devices.append(device_info)
+                
+                return (len(devices), json.dumps(devices))
+                
+            except Exception as e:
+                self.logger.error(f"Error getting track devices: {str(e)}")
+                return (0, f"Error getting track devices: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/list_devices", track_list_devices)
+        
+        def track_get_device_parameters(params):
+            """
+            Get parameters for a specific device on a track.
+            
+            Args:
+                track_index (int): Index of the track
+                device_index (int): Index of the device on the track
+                
+            Returns:
+                count (int): Number of parameters found
+                parameters (str): JSON string with parameter details
+            """
+            track_index = int(params[0])
+            device_index = int(params[1])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                
+                if device_index < 0 or device_index >= len(track.devices):
+                    return (0, f"Device index {device_index} out of range")
+                
+                device = track.devices[device_index]
+                parameters = []
+                
+                for param in device.parameters:
+                    param_info = {
+                        "name": param.name,
+                        "value": param.value,
+                        "normalized_value": param.value / (param.max - param.min) if param.max != param.min else 0,
+                        "min": param.min,
+                        "max": param.max,
+                        "is_quantized": param.is_quantized,
+                        "value_items": [str(item) for item in param.value_items] if hasattr(param, "value_items") else [],
+                        "is_automated": param.automation_state != 0 if hasattr(param, "automation_state") else False,
+                        "display_value": param.str_for_value(param.value) if hasattr(param, "str_for_value") else str(param.value)
+                    }
+                    parameters.append(param_info)
+                
+                return (len(parameters), json.dumps(parameters))
+                
+            except Exception as e:
+                self.logger.error(f"Error getting device parameters: {str(e)}")
+                return (0, f"Error getting device parameters: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/device/parameters", track_get_device_parameters)
+        
+        def track_get_device_parameter_value(params):
+            """
+            Get the current value of a specific parameter.
+            
+            Args:
+                track_index (int): Index of the track
+                device_index (int): Index of the device
+                parameter_name (str): Name of the parameter
+                
+            Returns:
+                value (float): Current parameter value
+                normalized (float): Normalized value (0-1)
+                display (str): Display value as string
+            """
+            track_index = int(params[0])
+            device_index = int(params[1])
+            parameter_name = str(params[2])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, 0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                
+                if device_index < 0 or device_index >= len(track.devices):
+                    return (0, 0, f"Device index {device_index} out of range")
+                
+                device = track.devices[device_index]
+                
+                # Find parameter by name
+                param = None
+                for p in device.parameters:
+                    if p.name == parameter_name:
+                        param = p
+                        break
+                
+                if param is None:
+                    return (0, 0, f"Parameter '{parameter_name}' not found")
+                
+                # Calculate normalized value
+                normalized = 0
+                if param.max != param.min:
+                    normalized = (param.value - param.min) / (param.max - param.min)
+                
+                # Get display value
+                display_value = param.str_for_value(param.value) if hasattr(param, "str_for_value") else str(param.value)
+                
+                return (param.value, normalized, display_value)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting parameter value: {str(e)}")
+                return (0, 0, f"Error getting parameter value: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/device/parameter/get", track_get_device_parameter_value)
+        
+        def track_set_device_parameter_value(params):
+            """
+            Set the value of a specific parameter.
+            
+            Args:
+                track_index (int): Index of the track
+                device_index (int): Index of the device
+                parameter_name (str): Name of the parameter
+                value (float): Value to set (raw, not normalized)
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            track_index = int(params[0])
+            device_index = int(params[1])
+            parameter_name = str(params[2])
+            value = float(params[3])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                
+                if device_index < 0 or device_index >= len(track.devices):
+                    return (0, f"Device index {device_index} out of range")
+                
+                device = track.devices[device_index]
+                
+                # Find parameter by name
+                param = None
+                for p in device.parameters:
+                    if p.name == parameter_name:
+                        param = p
+                        break
+                
+                if param is None:
+                    return (0, f"Parameter '{parameter_name}' not found")
+                
+                # Ensure value is within valid range
+                if value < param.min:
+                    value = param.min
+                elif value > param.max:
+                    value = param.max
+                
+                # Set parameter value
+                param.value = value
+                
+                return (1, f"Parameter '{parameter_name}' set to {value}")
+                
+            except Exception as e:
+                self.logger.error(f"Error setting parameter value: {str(e)}")
+                return (0, f"Error setting parameter value: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/device/parameter/set", track_set_device_parameter_value)
+        
+        def track_set_device_parameter_normalized(params):
+            """
+            Set the normalized value (0-1) of a specific parameter.
+            
+            Args:
+                track_index (int): Index of the track
+                device_index (int): Index of the device
+                parameter_name (str): Name of the parameter
+                normalized_value (float): Value to set (0-1 normalized)
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            track_index = int(params[0])
+            device_index = int(params[1])
+            parameter_name = str(params[2])
+            normalized_value = float(params[3])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                
+                if device_index < 0 or device_index >= len(track.devices):
+                    return (0, f"Device index {device_index} out of range")
+                
+                device = track.devices[device_index]
+                
+                # Find parameter by name
+                param = None
+                for p in device.parameters:
+                    if p.name == parameter_name:
+                        param = p
+                        break
+                
+                if param is None:
+                    return (0, f"Parameter '{parameter_name}' not found")
+                
+                # Ensure normalized value is within 0-1
+                if normalized_value < 0:
+                    normalized_value = 0
+                elif normalized_value > 1:
+                    normalized_value = 1
+                
+                # Convert normalized value to actual value
+                value = param.min + normalized_value * (param.max - param.min)
+                
+                # Set parameter value
+                param.value = value
+                
+                return (1, f"Parameter '{parameter_name}' set to {value} (normalized: {normalized_value})")
+                
+            except Exception as e:
+                self.logger.error(f"Error setting normalized parameter value: {str(e)}")
+                return (0, f"Error setting normalized parameter value: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/device/parameter/set_normalized", track_set_device_parameter_normalized)
+        
+        def track_add_device(params):
+            """
+            Add a device to a track by name (searches the browser).
+            
+            Args:
+                track_index (int): Index of the track
+                device_name (str): Name of the device to add
+                device_position (int, optional): Position to insert the device at (default: -1 = end)
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+                device_index (int): Index of the newly added device, or -1 if failed
+            """
+            track_index = int(params[0])
+            device_name = str(params[1])
+            device_position = int(params[2]) if len(params) > 2 else -1
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range", -1)
+                
+                track = self.song.tracks[track_index]
+                
+                # Search for the device in the browser
+                # This is a simplified approach - we'll list all devices and find a match
+                count, devices_json = browser_list_all_plugins([])
+                devices = json.loads(devices_json)
+                
+                # Find the first device matching the name
+                matching_device = None
+                for device in devices:
+                    if device_name.lower() in device["name"].lower():
+                        matching_device = device
+                        break
+                
+                if matching_device is None:
+                    return (0, f"No device found matching '{device_name}'", -1)
+                
+                # Check if device can be loaded
+                if not matching_device.get("is_loadable", False):
+                    return (0, f"Device '{matching_device['name']}' is not loadable", -1)
+                
+                # We found a matching device, now we need to add it to the track
+                # Unfortunately, the Ableton API doesn't provide a direct way to do this
+                # We'll try different approaches depending on what's available
+                
+                # Method 1: Using create_device if available
+                device_index = -1
+                if hasattr(track, "create_device") and callable(track.create_device):
+                    # Create the device
+                    device = track.create_device(matching_device["name"])
+                    
+                    # Find its index
+                    for i, d in enumerate(track.devices):
+                        if d == device:
+                            device_index = i
+                            break
+                    
+                    # Move to desired position if needed
+                    if device_index >= 0 and device_position >= 0 and device_position != device_index:
+                        # We need to implement logic to move the device to the desired position
+                        # This might not be directly supported, but we can try to use other API methods
+                        self.logger.warning("Moving devices to specific positions is not fully supported")
+                    
+                    return (1, f"Added device '{matching_device['name']}' to track", device_index)
+                
+                # Method 2: Using load_device if available
+                elif hasattr(track, "load_device") and callable(track.load_device):
+                    device = track.load_device(matching_device["path"])
+                    
+                    # Find its index
+                    for i, d in enumerate(track.devices):
+                        if d == device:
+                            device_index = i
+                            break
+                    
+                    return (1, f"Added device '{matching_device['name']}' to track", device_index)
+                
+                # No suitable method found
+                return (0, "Cannot add device - API doesn't support device creation", -1)
+                
+            except Exception as e:
+                self.logger.error(f"Error adding device: {str(e)}")
+                return (0, f"Error adding device: {str(e)}", -1)
+        
+        self.osc_server.add_handler("/live/track/add_device", track_add_device)
+        
+        def track_delete_device(params):
+            """
+            Delete a device from a track.
+            
+            Args:
+                track_index (int): Index of the track
+                device_index (int): Index of the device to delete
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            track_index = int(params[0])
+            device_index = int(params[1])
+            
+            try:
+                if track_index < 0 or track_index >= len(self.song.tracks):
+                    return (0, f"Track index {track_index} out of range")
+                
+                track = self.song.tracks[track_index]
+                
+                if device_index < 0 or device_index >= len(track.devices):
+                    return (0, f"Device index {device_index} out of range")
+                
+                device = track.devices[device_index]
+                device_name = device.name
+                
+                # Check if the device can be deleted
+                if hasattr(track, "delete_device") and callable(track.delete_device):
+                    track.delete_device(device_index)
+                    return (1, f"Deleted device '{device_name}' from track")
+                elif hasattr(device, "delete") and callable(device.delete):
+                    device.delete()
+                    return (1, f"Deleted device '{device_name}' from track")
+                else:
+                    return (0, "Cannot delete device - API doesn't support device deletion")
+                
+            except Exception as e:
+                self.logger.error(f"Error deleting device: {str(e)}")
+                return (0, f"Error deleting device: {str(e)}")
+        
+        self.osc_server.add_handler("/live/track/delete_device", track_delete_device)
+
     def current_song_time_changed(self):
         #--------------------------------------------------------------------------------
         # If song has rewound or skipped to next beat, sent a /live/beat message
