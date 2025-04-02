@@ -1054,7 +1054,7 @@ class ApplicationHandler(AbletonOSCHandler):
         try:
             self.logger.info("TCP request for all VST plugins")
             # Use the existing function but get all plugins
-            _, plugins_json = browser_list_vst_plugins([0, 10000])
+            _, plugins_json = self.browser_list_vst_plugins([0, 10000])
             return plugins_json
         except Exception as e:
             self.logger.error(f"Error handling TCP VST plugins request: {e}")
@@ -1065,7 +1065,7 @@ class ApplicationHandler(AbletonOSCHandler):
         try:
             self.logger.info("TCP request for all instrument categories")
             # Use the existing function to get all categories
-            _, categories_json = browser_list_instrument_categories([])
+            _, categories_json = self.browser_list_instrument_categories([])
             return categories_json
         except Exception as e:
             self.logger.error(f"Error handling TCP instrument categories request: {e}")
@@ -1076,7 +1076,7 @@ class ApplicationHandler(AbletonOSCHandler):
         try:
             self.logger.info("TCP request for all audio effects")
             # Use the existing function to get all effects
-            _, effects_json = browser_list_audio_effects([0, 10000])
+            _, effects_json = self.browser_list_audio_effects([0, 10000])
             return effects_json
         except Exception as e:
             self.logger.error(f"Error handling TCP audio effects request: {e}")
