@@ -1050,6 +1050,8 @@ class ApplicationHandler(AbletonOSCHandler):
     def register_tcp_handlers(self):
         """Register TCP handlers for large data transfers"""
         self.osc_server.add_tcp_handler("GET_VST_PLUGINS", self._tcp_get_vst_plugins)
+        self.osc_server.add_tcp_handler("GET_VST2_PLUGINS", self._tcp_get_vst2_plugins)
+        self.osc_server.add_tcp_handler("GET_VST3_PLUGINS", self._tcp_get_vst3_plugins)
         self.osc_server.add_tcp_handler("GET_INSTRUMENT_CATEGORIES", self._tcp_get_instrument_categories)
         self.osc_server.add_tcp_handler("GET_AUDIO_EFFECTS", self._tcp_get_audio_effects)
         self.logger.info("Registered TCP handlers for large data transfers")
@@ -1063,6 +1065,48 @@ class ApplicationHandler(AbletonOSCHandler):
             return plugins_json
         except Exception as e:
             self.logger.error(f"Error handling TCP VST plugins request: {e}")
+            return json.dumps({"error": str(e)})
+    
+    def _tcp_get_vst2_plugins(self):
+        """TCP handler to get VST2 plugins only"""
+        try:
+            self.logger.info("TCP request for VST2 plugins only")
+            
+            # Get all VST plugins first
+            _, all_plugins_json = self.browser_list_vst_plugins([0, 10000])
+            all_plugins = json.loads(all_plugins_json)
+            
+            # Filter for VST2 plugins only (typically listed under 'VST' category)
+            vst2_plugins = [
+                plugin for plugin in all_plugins 
+                if "format" in plugin and plugin["format"] == "VST"
+            ]
+            
+            self.logger.info(f"Found {len(vst2_plugins)} VST2 plugins")
+            return json.dumps(vst2_plugins)
+        except Exception as e:
+            self.logger.error(f"Error handling TCP VST2 plugins request: {e}")
+            return json.dumps({"error": str(e)})
+    
+    def _tcp_get_vst3_plugins(self):
+        """TCP handler to get VST3 plugins only"""
+        try:
+            self.logger.info("TCP request for VST3 plugins only")
+            
+            # Get all VST plugins first
+            _, all_plugins_json = self.browser_list_vst_plugins([0, 10000])
+            all_plugins = json.loads(all_plugins_json)
+            
+            # Filter for VST3 plugins only (typically listed under 'VST3' category)
+            vst3_plugins = [
+                plugin for plugin in all_plugins 
+                if "format" in plugin and plugin["format"] == "VST3"
+            ]
+            
+            self.logger.info(f"Found {len(vst3_plugins)} VST3 plugins")
+            return json.dumps(vst3_plugins)
+        except Exception as e:
+            self.logger.error(f"Error handling TCP VST3 plugins request: {e}")
             return json.dumps({"error": str(e)})
     
     def _tcp_get_instrument_categories(self):
