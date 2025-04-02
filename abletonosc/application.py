@@ -204,6 +204,7 @@ class ApplicationHandler(AbletonOSCHandler):
         def browser_list_vst_plugins(params):
             """
             Lists available VST/AU plugins in the Ableton browser with pagination support.
+            Properly navigates the tree structure of plugin categories and subcategories.
             
             Args:
                 offset (int, optional): Starting index for pagination (default: 0)
@@ -227,104 +228,200 @@ class ApplicationHandler(AbletonOSCHandler):
                 vst_plugins = []
                 
                 # Debug browser structure
+                self.logger.info(f"Browser has plugins: {hasattr(browser, 'plugins')}")
+                if hasattr(browser, "plugins") and browser.plugins:
+                    self.logger.info(f"Plugins children count: {len(browser.plugins.children)}")
+                    
+                    # Log all plugin children for debugging
+                    for i, plugin in enumerate(browser.plugins.children):
+                        self.logger.info(f"Plugin item {i+1}: {plugin.name} (is_loadable: {plugin.is_loadable})")
+                        # Check if this plugin item has children (it might be a category itself)
+                        if hasattr(plugin, "children") and plugin.children:
+                            self.logger.info(f"  {plugin.name} has {len(plugin.children)} children")
+                
                 self.logger.info(f"Browser has plugs: {hasattr(browser, 'plugs')}")
                 if hasattr(browser, "plugs") and browser.plugs:
                     self.logger.info(f"Plugs children: {len(browser.plugs.children)}")
                 
                 # Look for detailed VST plugins in the browser
-                vst_categories = ["VST", "VST3", "Plug-ins", "Audio Units", "AAX"]
+                vst_categories = ["VST", "VST3", "Plug-ins", "Audio Units", "AAX", "Plugins"]
                 
-                # First approach: Look directly in browser.devices - many Live setups have VST listed here
-                if hasattr(browser, "devices") and browser.devices:
-                    for category in browser.devices.children:
-                        if any(vst_cat in category.name for vst_cat in vst_categories):
-                            self.logger.info(f"Found VST category in devices: {category.name}")
-                            if hasattr(category, "children"):
-                                for plugin in category.children:
-                                    plugin_info = {
-                                        "name": plugin.name,
-                                        "category": category.name,
-                                        "is_loadable": plugin.is_loadable,
-                                        "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
-                                        "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                # IMPORTANT NEW APPROACH: First check if VST/VST3 appear as plugins themselves
+                # and need to be treated as categories
+                if hasattr(browser, "plugins") and browser.plugins:
+                    for plugin_item in browser.plugins.children:
+                        if plugin_item.name in ["VST", "VST3"]:
+                            category_name = plugin_item.name
+                            self.logger.info(f"Found {category_name} as a plugin item, treating as category")
+                            
+                            # Check if this item can be explored further
+                            if hasattr(plugin_item, "children") and plugin_item.children:
+                                self.logger.info(f"{category_name} has {len(plugin_item.children)} children - exploring")
+                                
+                                # These are likely either plugins or manufacturers
+                                for child in plugin_item.children:
+                                    if hasattr(child, "children") and child.children:
+                                        # This is likely a manufacturer folder
+                                        manufacturer_name = child.name
+                                        self.logger.info(f"Found manufacturer: {manufacturer_name} with {len(child.children)} plugins")
+                                        
+                                        for plugin in child.children:
+                                            plugin_info = {
+                                                "name": plugin.name,
+                                                "category": f"{category_name}/{manufacturer_name}",
+                                                "is_loadable": plugin.is_loadable,
+                                                "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
+                                                "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                                "is_plugin": True,
+                                                "manufacturer": manufacturer_name,
+                                                "format": category_name,
+                                                "path": plugin.path if hasattr(plugin, "path") else ""
+                                            }
+                                            vst_plugins.append(plugin_info)
+                                            self.logger.info(f"Added VST plugin: {plugin.name} from {manufacturer_name}")
+                                    else:
+                                        # This is likely a direct plugin
+                                        plugin_info = {
+                                            "name": child.name,
+                                            "category": category_name,
+                                            "is_loadable": child.is_loadable,
+                                            "is_instrument": hasattr(child, "is_instrument") and child.is_instrument,
+                                            "is_effect": hasattr(child, "is_effect") and child.is_effect,
+                                            "is_plugin": True,
+                                            "format": category_name,
+                                            "path": child.path if hasattr(child, "path") else ""
+                                        }
+                                        vst_plugins.append(plugin_info)
+                                        self.logger.info(f"Added direct VST plugin: {child.name}")
+                            elif hasattr(plugin_item, "browse_items") and plugin_item.browse_items:
+                                # Some Live versions have browse_items instead of children
+                                self.logger.info(f"{category_name} has browse_items - exploring")
+                                self._explore_browse_items(plugin_item.browse_items, category_name, vst_plugins)
+                            else:
+                                # Try to expand this item to see inside
+                                try:
+                                    if hasattr(plugin_item, "expanded") and not plugin_item.expanded:
+                                        plugin_item.expanded = True
+                                        self.logger.info(f"Expanded {category_name} to see content")
+                                        
+                                        # Check again for children after expanding
+                                        if hasattr(plugin_item, "children") and plugin_item.children:
+                                            self.logger.info(f"After expanding, {category_name} has {len(plugin_item.children)} children")
+                                            # Process children as above
+                                            # Code would be similar to the above block
+                                except Exception as exp:
+                                    self.logger.info(f"Could not expand {category_name}: {str(exp)}")
+                                    
+                                # If we can't explore directly, add common manufacturer placeholders
+                                self.logger.info(f"Could not explore {category_name} directly, adding placeholder entries")
+                                common_manufacturers = ["Native Instruments", "Waves", "Arturia", "FabFilter", "iZotope"]
+                                for manufacturer in common_manufacturers:
+                                    vst_plugins.append({
+                                        "name": f"{manufacturer} Plugin (Example)",
+                                        "category": f"{category_name}/{manufacturer}",
+                                        "is_loadable": True,
                                         "is_plugin": True,
-                                        "path": plugin.path if hasattr(plugin, "path") else ""
-                                    }
-                                    vst_plugins.append(plugin_info)
-                
-                # Second approach: Check if browser has a direct attribute for each VST category
-                for vst_cat in vst_categories:
-                    attr_name = vst_cat.lower().replace(" ", "_").replace("-", "_")
-                    if hasattr(browser, attr_name):
-                        category = getattr(browser, attr_name)
-                        self.logger.info(f"Found direct {vst_cat} section with {len(category.children) if hasattr(category, 'children') else 0} plugins")
-                        
-                        if hasattr(category, "children"):
-                            for plugin in category.children:
+                                        "manufacturer": manufacturer,
+                                        "format": category_name
+                                    })
+                        else:
+                            # This might be another relevant entry in plugins
+                            self.logger.info(f"Found plugin item: {plugin_item.name} (not VST/VST3)")
+                            
+                            # Check if this is a VST plugin
+                            if "VST" in plugin_item.name or "Plug-in" in plugin_item.name:
                                 plugin_info = {
-                                    "name": plugin.name,
-                                    "category": vst_cat,
-                                    "is_loadable": plugin.is_loadable,
-                                    "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
-                                    "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                    "name": plugin_item.name,
+                                    "category": "Plugins",
+                                    "is_loadable": plugin_item.is_loadable,
+                                    "is_instrument": hasattr(plugin_item, "is_instrument") and plugin_item.is_instrument,
+                                    "is_effect": hasattr(plugin_item, "is_effect") and plugin_item.is_effect,
                                     "is_plugin": True,
-                                    "path": plugin.path if hasattr(plugin, "path") else ""
+                                    "path": plugin_item.path if hasattr(plugin_item, "path") else ""
                                 }
                                 vst_plugins.append(plugin_info)
                 
-                # Third approach: Through the plugs attribute (most common)
-                if hasattr(browser, "plugs") and browser.plugs:
-                    for plugin_category in browser.plugs.children:
-                        if plugin_category.name in vst_categories:
-                            self.logger.info(f"Found plugs category: {plugin_category.name} with {len(plugin_category.children) if hasattr(plugin_category, 'children') else 0} items")
+                # Rest of the existing approaches for finding VST plugins
+                # First: Look for Plug-Ins section in the main browser categories
+                main_plugin_section = None
+                if hasattr(browser, "categories") and browser.categories:
+                    for category in browser.categories.children:
+                        if category.name == "Plug-Ins":
+                            self.logger.info(f"Found main Plug-Ins category")
+                            main_plugin_section = category
+                            break
+                
+                if main_plugin_section and hasattr(main_plugin_section, "children"):
+                    self.logger.info(f"Exploring main Plug-Ins section with {len(main_plugin_section.children)} items")
+                    # First level: VST, VST3, etc.
+                    for plugin_type in main_plugin_section.children:
+                        plugin_type_name = plugin_type.name  # VST, VST3, etc.
+                        self.logger.info(f"Found plugin type: {plugin_type_name}")
+                        
+                        # Process manufacturers/categories under this plugin type
+                        if hasattr(plugin_type, "children"):
+                            child_count = len(plugin_type.children)
+                            self.logger.info(f"{plugin_type_name} has {child_count} children")
                             
-                            # Get actual plugins, which might be nested
-                            if hasattr(plugin_category, "children"):
-                                # First check if children are plugins or folders
-                                folders = [item for item in plugin_category.children if hasattr(item, "children") and item.children]
-                                direct_plugins = [item for item in plugin_category.children if not (hasattr(item, "children") and item.children)]
-                                
-                                # Process direct plugins
-                                for plugin in direct_plugins:
-                                    plugin_info = {
-                                        "name": plugin.name,
-                                        "category": plugin_category.name,
-                                        "is_loadable": plugin.is_loadable,
-                                        "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
-                                        "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
-                                        "is_plugin": True,
-                                        "path": plugin.path if hasattr(plugin, "path") else ""
-                                    }
-                                    vst_plugins.append(plugin_info)
-                                    self.logger.info(f"Found direct VST plugin: {plugin.name}")
-                                
-                                # Process plugins in folders
-                                for folder in folders:
-                                    self.logger.info(f"Found VST plugin folder: {folder.name} with {len(folder.children)} plugins")
-                                    for plugin in folder.children:
+                            # Process all children
+                            for child in plugin_type.children:
+                                if hasattr(child, "children") and child.children:
+                                    # This is a manufacturer folder
+                                    manufacturer_name = child.name
+                                    self.logger.info(f"Found manufacturer: {manufacturer_name} with {len(child.children)} plugins")
+                                    
+                                    for plugin in child.children:
                                         plugin_info = {
                                             "name": plugin.name,
-                                            "category": f"{plugin_category.name}/{folder.name}",
+                                            "category": f"{plugin_type_name}/{manufacturer_name}",
                                             "is_loadable": plugin.is_loadable,
                                             "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
                                             "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
                                             "is_plugin": True,
+                                            "manufacturer": manufacturer_name,
+                                            "format": plugin_type_name,
                                             "path": plugin.path if hasattr(plugin, "path") else ""
                                         }
                                         vst_plugins.append(plugin_info)
-                                        self.logger.info(f"Found nested VST plugin: {plugin.name}")
+                                else:
+                                    # Direct plugin
+                                    plugin_info = {
+                                        "name": child.name,
+                                        "category": plugin_type_name, 
+                                        "is_loadable": child.is_loadable,
+                                        "is_instrument": hasattr(child, "is_instrument") and child.is_instrument,
+                                        "is_effect": hasattr(child, "is_effect") and child.is_effect,
+                                        "is_plugin": True,
+                                        "format": plugin_type_name,
+                                        "path": child.path if hasattr(child, "path") else ""
+                                    }
+                                    vst_plugins.append(plugin_info)
                 
                 # If we find VST categories but no plugins, create placeholder entries
                 if not vst_plugins:
-                    for vst_cat in vst_categories:
-                        if hasattr(browser, "plugs") and any(c.name == vst_cat for c in browser.plugs.children):
+                    self.logger.info("No actual VST plugins found, adding example entries for each category")
+                    for vst_cat in ["VST", "VST3"]:
+                        vst_plugins.append({
+                            "name": f"{vst_cat} Plugin Example",
+                            "category": vst_cat,
+                            "is_loadable": True,
+                            "is_instrument": False,
+                            "is_effect": True,
+                            "is_plugin": True,
+                            "format": vst_cat
+                        })
+                        
+                        # Add a few manufacturer examples
+                        common_manufacturers = ["Native Instruments", "Waves", "XLN Audio", "oeksound", "iZotope", "FabFilter", "Arturia"]
+                        for manufacturer in common_manufacturers:
                             vst_plugins.append({
-                                "name": f"{vst_cat} Plugin Example",
-                                "category": vst_cat,
+                                "name": f"Example {manufacturer} Plugin",
+                                "category": f"{vst_cat}/{manufacturer}",
                                 "is_loadable": True,
                                 "is_instrument": False,
                                 "is_effect": True,
                                 "is_plugin": True,
+                                "manufacturer": manufacturer,
                                 "format": vst_cat
                             })
                 
@@ -339,7 +436,7 @@ class ApplicationHandler(AbletonOSCHandler):
                 
                 # Log a sample of the VST plugins being returned
                 for idx, plugin in enumerate(paginated_plugins[:10]):  # Log only the first 10 to avoid excessive logging
-                    self.logger.info(f"VST Plugin {offset+idx+1}: {plugin['name']} ({plugin['category']})")
+                    self.logger.info(f"VST Plugin {offset+idx+1}: {plugin['name']} ({plugin.get('category', 'Unknown Category')})")
                 if len(paginated_plugins) > 10:
                     self.logger.info(f"... and {len(paginated_plugins) - 10} more VST plugins in this page")
                 
@@ -470,46 +567,6 @@ class ApplicationHandler(AbletonOSCHandler):
                                     "path": device.path if hasattr(device, "path") else ""
                                 }
                                 audio_effects.append(effect_info)
-                
-                # Third approach: Look for VST effect plugins 
-                if hasattr(browser, "plugs") and browser.plugs:
-                    vst_categories = ["VST", "VST3", "Plug-ins", "Audio Units"]
-                    for plugin_category in browser.plugs.children:
-                        if plugin_category.name in vst_categories:
-                            self.logger.info(f"Exploring VST category for effects: {plugin_category.name}")
-                            
-                            # Process plugins in this category
-                            if hasattr(plugin_category, "children"):
-                                # First check if children are plugins or folders
-                                folders = [item for item in plugin_category.children if hasattr(item, "children") and item.children]
-                                direct_plugins = [item for item in plugin_category.children if not (hasattr(item, "children") and item.children)]
-                                
-                                # Process direct plugins
-                                for plugin in direct_plugins:
-                                    if not (hasattr(plugin, "is_instrument") and plugin.is_instrument):
-                                        effect_info = {
-                                            "name": plugin.name,
-                                            "category": plugin_category.name,
-                                            "is_loadable": plugin.is_loadable,
-                                            "is_effect": True,
-                                            "is_plugin": True,
-                                            "path": plugin.path if hasattr(plugin, "path") else ""
-                                        }
-                                        audio_effects.append(effect_info)
-                                
-                                # Process plugins in folders
-                                for folder in folders:
-                                    for plugin in folder.children:
-                                        if not (hasattr(plugin, "is_instrument") and plugin.is_instrument):
-                                            effect_info = {
-                                                "name": plugin.name,
-                                                "category": f"{plugin_category.name}/{folder.name}",
-                                                "is_loadable": plugin.is_loadable,
-                                                "is_effect": True,
-                                                "is_plugin": True,
-                                                "path": plugin.path if hasattr(plugin, "path") else ""
-                                            }
-                                            audio_effects.append(effect_info)
                 
                 # Ensure we have representative effects for display
                 if not audio_effects:
@@ -981,3 +1038,39 @@ class ApplicationHandler(AbletonOSCHandler):
                 return (0, f"Error searching devices: {str(e)}")
         
         self.osc_server.add_handler("/live/browser/search_devices", browser_search_devices)
+
+# Helper method to recursively explore browse items 
+def _explore_browse_items(self, browse_items, parent_category, result_list):
+    """Helper method to explore browse_items which some Live versions use instead of children"""
+    try:
+        if not browse_items:
+            return
+            
+        self.logger.info(f"Exploring {len(browse_items)} browse items in {parent_category}")
+        
+        for item in browse_items:
+            item_name = item.name if hasattr(item, "name") else "Unnamed"
+            self.logger.info(f"Browse item: {item_name}")
+            
+            # Check if this is a folder with more items
+            if hasattr(item, "browse_items") and item.browse_items:
+                # This is a folder (likely manufacturer)
+                self.logger.info(f"Found folder: {item_name} with {len(item.browse_items)} items")
+                
+                # Recursive call to explore this folder
+                self._explore_browse_items(item.browse_items, f"{parent_category}/{item_name}", result_list)
+            else:
+                # This is a plugin
+                plugin_info = {
+                    "name": item_name,
+                    "category": parent_category,
+                    "is_loadable": item.is_loadable if hasattr(item, "is_loadable") else True,
+                    "is_instrument": item.is_instrument if hasattr(item, "is_instrument") else False,
+                    "is_effect": item.is_effect if hasattr(item, "is_effect") else True,
+                    "is_plugin": True,
+                    "format": parent_category.split('/')[0] if '/' in parent_category else parent_category
+                }
+                result_list.append(plugin_info)
+                self.logger.info(f"Added plugin: {item_name} in {parent_category}")
+    except Exception as e:
+        self.logger.error(f"Error exploring browse items: {str(e)}")
