@@ -38,6 +38,17 @@ class OSCServer:
         self._socket.bind(self._local_addr)
         self._callbacks = {}
 
+                # Increase socket buffer sizes to handle larger UDP packets (fix for WinError 10040)
+        try:
+            send_buffer_size = 65535 
+            recv_buffer_size = 65535 
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, send_buffer_size)
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, recv_buffer_size)
+            self.logger = logging.getLogger("abletonosc")
+            self.logger.info(f"Socket buffer sizes increased to {send_buffer_size} bytes")
+        except Exception as e:
+            pass
+
         self.logger = logging.getLogger("abletonosc")
         self.logger.info("Starting OSC server (local %s, response port %d)",
                          str(self._local_addr), self._response_port)

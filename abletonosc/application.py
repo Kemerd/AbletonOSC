@@ -1,5 +1,5 @@
 import Live
-from typing import Tuple, Any
+from typing import Tuple, Any, Dict, List
 import json
 import logging
 from .handler import AbletonOSCHandler
@@ -1038,6 +1038,49 @@ class ApplicationHandler(AbletonOSCHandler):
                 return (0, f"Error searching devices: {str(e)}")
         
         self.osc_server.add_handler("/live/browser/search_devices", browser_search_devices)
+
+        # Register TCP handlers for large data transfers
+        self.register_tcp_handlers()
+    
+    def register_tcp_handlers(self):
+        """Register TCP handlers for large data transfers"""
+        self.add_tcp_handler("GET_VST_PLUGINS", self._tcp_get_vst_plugins)
+        self.add_tcp_handler("GET_INSTRUMENT_CATEGORIES", self._tcp_get_instrument_categories)
+        self.add_tcp_handler("GET_AUDIO_EFFECTS", self._tcp_get_audio_effects)
+        self.logger.info("Registered TCP handlers for large data transfers")
+    
+    def _tcp_get_vst_plugins(self):
+        """TCP handler to get all VST plugins"""
+        try:
+            self.logger.info("TCP request for all VST plugins")
+            # Use the existing function but get all plugins
+            _, plugins_json = browser_list_vst_plugins([0, 10000])
+            return plugins_json
+        except Exception as e:
+            self.logger.error(f"Error handling TCP VST plugins request: {e}")
+            return json.dumps({"error": str(e)})
+    
+    def _tcp_get_instrument_categories(self):
+        """TCP handler to get all instrument categories"""
+        try:
+            self.logger.info("TCP request for all instrument categories")
+            # Use the existing function to get all categories
+            _, categories_json = browser_list_instrument_categories([])
+            return categories_json
+        except Exception as e:
+            self.logger.error(f"Error handling TCP instrument categories request: {e}")
+            return json.dumps({"error": str(e)})
+    
+    def _tcp_get_audio_effects(self):
+        """TCP handler to get all audio effects"""
+        try:
+            self.logger.info("TCP request for all audio effects")
+            # Use the existing function to get all effects
+            _, effects_json = browser_list_audio_effects([0, 10000])
+            return effects_json
+        except Exception as e:
+            self.logger.error(f"Error handling TCP audio effects request: {e}")
+            return json.dumps({"error": str(e)})
 
 # Helper method to recursively explore browse items 
 def _explore_browse_items(self, browse_items, parent_category, result_list):
