@@ -577,10 +577,12 @@ class ApplicationHandler(AbletonOSCHandler):
         def browser_list_instruments(params):
             """
             Lists available instruments in the Ableton browser with pagination support.
+            IMPORTANT: This function uses pagination to avoid UDP buffer overflow when
+            dealing with large numbers of instruments (4000+).
             
             Args:
                 offset (int, optional): Starting index for pagination (default: 0)
-                limit (int, optional): Maximum number of instruments to return (default: 1000)
+                limit (int, optional): Maximum number of instruments to return (default: 100)
                 
             Returns:
                 count (int): Total number of instruments found (ignores pagination)
@@ -589,7 +591,7 @@ class ApplicationHandler(AbletonOSCHandler):
             try:
                 # Parse pagination parameters
                 offset = int(params[0]) if len(params) > 0 else 0
-                limit = int(params[1]) if len(params) > 1 else 1000
+                limit = int(params[1]) if len(params) > 1 else 100  # Default to 100 instruments per page
                 
                 self.logger.info(f"Listing instruments with pagination: offset={offset}, limit={limit}")
                 
@@ -758,6 +760,8 @@ class ApplicationHandler(AbletonOSCHandler):
                         self.logger.info(f"Instrument {offset+idx+1}: {instrument['name']} ({instrument['category']})")
                     if len(paginated_instruments) > 5:
                         self.logger.info(f"... and {len(paginated_instruments) - 5} more instruments in this page")
+                else:
+                    self.logger.info("No instruments returned in this page range")
                 
                 # Return total count (not just the paginated count) and the paginated instruments
                 return (total_count, json.dumps(paginated_instruments))
@@ -770,16 +774,18 @@ class ApplicationHandler(AbletonOSCHandler):
         
         def browser_get_instrument_count(params):
             """
-            Gets only the count of available instruments without returning the data.
-            Useful for setting up pagination in clients.
+            Gets only the count of available instruments without returning any data.
+            This is a lightweight call to setup pagination for instruments, which is
+            essential when dealing with large numbers of instruments (4000+).
             
             Returns:
                 count (int): Total number of instruments available
             """
             try:
                 # Get the count by calling the instruments function with an offset beyond the range
-                # This will still compute the total but return an empty list for the instruments
+                # This will compute the total count but return an empty list for the instruments
                 total_count, _ = browser_list_instruments([9999999, 0])
+                self.logger.info(f"Instrument count: {total_count}")
                 return (total_count,)
                 
             except Exception as e:
@@ -787,6 +793,150 @@ class ApplicationHandler(AbletonOSCHandler):
                 return (0,)
         
         self.osc_server.add_handler("/live/browser/get_instrument_count", browser_get_instrument_count)
+        
+        def browser_get_instruments_page(params):
+            """
+            Gets a specific page of instruments, simplifying client-side pagination.
+            
+            Args:
+                page (int): The page number to retrieve (0-based)
+                page_size (int, optional): Number of instruments per page (default: 100)
+                
+            Returns:
+                total_count (int): Total number of instruments available
+                page_count (int): Total number of pages available
+                current_page (int): The current page number
+                instruments (str): JSON string with the instruments for this page
+            """
+            try:
+                # Parse parameters
+                page = int(params[0]) if len(params) > 0 else 0
+                page_size = int(params[1]) if len(params) > 1 else 100
+                
+                # Calculate offset
+                offset = page * page_size
+                
+                self.logger.info(f"Getting instruments page {page} with page size {page_size}")
+                
+                # Get instruments for this page
+                total_count, instruments_json = browser_list_instruments([offset, page_size])
+                
+                # Calculate page count
+                page_count = (total_count + page_size - 1) // page_size  # Ceiling division
+                
+                self.logger.info(f"Returning page {page} of {page_count} (total instruments: {total_count})")
+                
+                return (total_count, page_count, page, instruments_json)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting instruments page: {str(e)}")
+                return (0, 0, 0, "[]")
+        
+        self.osc_server.add_handler("/live/browser/get_instruments_page", browser_get_instruments_page)
+        
+        def browser_get_instrument_categories(params):
+            """
+            Gets only the instrument categories from Ableton without processing all individual instruments.
+            This is much more efficient than fetching thousands of individual instruments.
+            
+            Returns:
+                count (int): Number of instrument categories found
+                categories (str): JSON string with category information
+            """
+            try:
+                self.logger.info("Getting instrument categories only")
+                
+                application = Live.Application.get_application()
+                browser = application.browser
+                
+                # List to store all instrument categories
+                categories = []
+                
+                # First approach: Find categories from devices section
+                if hasattr(browser, "devices") and browser.devices:
+                    for category in browser.devices.children:
+                        # Look for instrument categories
+                        if "Instrument" in category.name:
+                            category_info = {
+                                "name": category.name,
+                                "type": "instrument_category",
+                                "path": category.path if hasattr(category, "path") else "",
+                                "item_count": len(category.children) if hasattr(category, "children") else 0
+                            }
+                            categories.append(category_info)
+                            self.logger.info(f"Found instrument category: {category.name} with {category_info['item_count']} items")
+                
+                # Second approach: Check dedicated instrument sections
+                instrument_sections = ["Instruments", "Drums", "Samples"]
+                for section_name in instrument_sections:
+                    attr_name = section_name.lower()
+                    if hasattr(browser, attr_name):
+                        section = getattr(browser, attr_name)
+                        if hasattr(section, "children"):
+                            category_info = {
+                                "name": section_name,
+                                "type": "instrument_section",
+                                "path": section.path if hasattr(section, "path") else "",
+                                "item_count": len(section.children)
+                            }
+                            categories.append(category_info)
+                            self.logger.info(f"Found instrument section: {section_name} with {category_info['item_count']} items")
+                
+                # Third approach: Look for instrument plugin categories
+                if hasattr(browser, "plugs") and browser.plugs:
+                    vst_categories = ["VST", "VST3", "Audio Units"]
+                    for plugin_category in browser.plugs.children:
+                        if plugin_category.name in vst_categories:
+                            # Count only instrument plugins in this category
+                            instrument_count = 0
+                            plugin_folders = []
+                            
+                            # Check if we can determine instrument count
+                            if hasattr(plugin_category, "children"):
+                                for item in plugin_category.children:
+                                    if hasattr(item, "children") and item.children:
+                                        # This is a folder, count instruments inside
+                                        folder_instruments = sum(1 for plugin in item.children 
+                                                               if hasattr(plugin, "is_instrument") and plugin.is_instrument)
+                                        if folder_instruments > 0:
+                                            plugin_folders.append({
+                                                "name": item.name,
+                                                "count": folder_instruments
+                                            })
+                                            instrument_count += folder_instruments
+                                    elif hasattr(item, "is_instrument") and item.is_instrument:
+                                        # Direct instrument plugin
+                                        instrument_count += 1
+                            
+                            # Only add category if we found instruments or we can't determine
+                            category_info = {
+                                "name": f"{plugin_category.name} Instruments",
+                                "type": "plugin_category",
+                                "format": plugin_category.name,
+                                "item_count": instrument_count,
+                                "folders": plugin_folders
+                            }
+                            categories.append(category_info)
+                            self.logger.info(f"Found plugin category: {plugin_category.name} with approximately {instrument_count} instruments")
+                
+                # Ensure we have at least some categories to display
+                if not categories:
+                    self.logger.info("No instrument categories found, adding example entries")
+                    categories = [
+                        {"name": "Instrument Racks", "type": "instrument_category", "item_count": 0},
+                        {"name": "MIDI Effects", "type": "instrument_category", "item_count": 0},
+                        {"name": "VST Instruments", "type": "plugin_category", "format": "VST", "item_count": 0}
+                    ]
+                
+                # Return count and categories
+                self.logger.info(f"Returning {len(categories)} instrument categories")
+                return (len(categories), json.dumps(categories))
+                
+            except Exception as e:
+                self.logger.error(f"Error getting instrument categories: {str(e)}")
+                return (0, "[]")
+        
+        self.osc_server.add_handler("/live/browser/get_instrument_categories", browser_get_instrument_categories)
         
         def browser_search_devices(params):
             """
