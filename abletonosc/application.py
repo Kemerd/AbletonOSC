@@ -1060,9 +1060,21 @@ class ApplicationHandler(AbletonOSCHandler):
         """TCP handler to get all VST plugins"""
         try:
             self.logger.info("TCP request for all VST plugins")
-            # Use the reference to the browser function with arguments for all plugins
-            _, plugins_json = self.browser_list_vst_plugins([0, 10000])
-            return plugins_json
+            
+            # Use our optimized methods to get both VST2 and VST3 plugins
+            # Get VST2 plugins
+            vst2_plugins_json = self._tcp_get_vst2_plugins()
+            vst2_plugins = json.loads(vst2_plugins_json)
+            
+            # Get VST3 plugins
+            vst3_plugins_json = self._tcp_get_vst3_plugins()
+            vst3_plugins = json.loads(vst3_plugins_json)
+            
+            # Combine both lists
+            all_plugins = vst2_plugins + vst3_plugins
+            
+            self.logger.info(f"Returning {len(all_plugins)} total VST plugins (VST2: {len(vst2_plugins)}, VST3: {len(vst3_plugins)})")
+            return json.dumps(all_plugins)
         except Exception as e:
             self.logger.error(f"Error handling TCP VST plugins request: {e}")
             return json.dumps({"error": str(e)})
@@ -1072,15 +1084,58 @@ class ApplicationHandler(AbletonOSCHandler):
         try:
             self.logger.info("TCP request for VST2 plugins only")
             
-            # Get all VST plugins first
-            _, all_plugins_json = self.browser_list_vst_plugins([0, 10000])
-            all_plugins = json.loads(all_plugins_json)
+            # Directly explore only VST2 plugins for better performance
+            application = Live.Application.get_application()
+            browser = application.browser
+            vst2_plugins = []
             
-            # Filter for VST2 plugins only (typically listed under 'VST' category)
-            vst2_plugins = [
-                plugin for plugin in all_plugins 
-                if "format" in plugin and plugin["format"] == "VST"
-            ]
+            # Check if we have plugins section in browser
+            if hasattr(browser, "plugins") and browser.plugins:
+                # Find the VST folder (not VST3)
+                for plugin_item in browser.plugins.children:
+                    if plugin_item.name == "VST":  # Specifically looking for VST (VST2)
+                        category_name = plugin_item.name
+                        self.logger.info(f"Found VST2 category: {category_name}")
+                        
+                        # Check if this item can be explored further
+                        if hasattr(plugin_item, "children") and plugin_item.children:
+                            self.logger.info(f"VST2 category has {len(plugin_item.children)} children - exploring")
+                            
+                            # These are likely either plugins or manufacturers
+                            for child in plugin_item.children:
+                                if hasattr(child, "children") and child.children:
+                                    # This is likely a manufacturer folder
+                                    manufacturer_name = child.name
+                                    self.logger.info(f"Found manufacturer: {manufacturer_name} with {len(child.children)} plugins")
+                                    
+                                    for plugin in child.children:
+                                        plugin_info = {
+                                            "name": plugin.name,
+                                            "category": f"{category_name}/{manufacturer_name}",
+                                            "is_loadable": plugin.is_loadable,
+                                            "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
+                                            "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                            "is_plugin": True,
+                                            "manufacturer": manufacturer_name,
+                                            "format": category_name,
+                                            "path": plugin.path if hasattr(plugin, "path") else ""
+                                        }
+                                        vst2_plugins.append(plugin_info)
+                                        self.logger.info(f"Added VST2 plugin: {plugin.name} from {manufacturer_name}")
+                                else:
+                                    # This is likely a direct plugin
+                                    plugin_info = {
+                                        "name": child.name,
+                                        "category": category_name,
+                                        "is_loadable": child.is_loadable,
+                                        "is_instrument": hasattr(child, "is_instrument") and child.is_instrument,
+                                        "is_effect": hasattr(child, "is_effect") and child.is_effect,
+                                        "is_plugin": True,
+                                        "format": category_name,
+                                        "path": child.path if hasattr(child, "path") else ""
+                                    }
+                                    vst2_plugins.append(plugin_info)
+                                    self.logger.info(f"Added direct VST2 plugin: {child.name}")
             
             self.logger.info(f"Found {len(vst2_plugins)} VST2 plugins")
             return json.dumps(vst2_plugins)
@@ -1093,15 +1148,58 @@ class ApplicationHandler(AbletonOSCHandler):
         try:
             self.logger.info("TCP request for VST3 plugins only")
             
-            # Get all VST plugins first
-            _, all_plugins_json = self.browser_list_vst_plugins([0, 10000])
-            all_plugins = json.loads(all_plugins_json)
+            # Directly explore only VST3 plugins for better performance
+            application = Live.Application.get_application()
+            browser = application.browser
+            vst3_plugins = []
             
-            # Filter for VST3 plugins only (typically listed under 'VST3' category)
-            vst3_plugins = [
-                plugin for plugin in all_plugins 
-                if "format" in plugin and plugin["format"] == "VST3"
-            ]
+            # Check if we have plugins section in browser
+            if hasattr(browser, "plugins") and browser.plugins:
+                # Find the VST3 folder (not VST2)
+                for plugin_item in browser.plugins.children:
+                    if plugin_item.name == "VST3":  # Specifically looking for VST3
+                        category_name = plugin_item.name
+                        self.logger.info(f"Found VST3 category: {category_name}")
+                        
+                        # Check if this item can be explored further
+                        if hasattr(plugin_item, "children") and plugin_item.children:
+                            self.logger.info(f"VST3 category has {len(plugin_item.children)} children - exploring")
+                            
+                            # These are likely either plugins or manufacturers
+                            for child in plugin_item.children:
+                                if hasattr(child, "children") and child.children:
+                                    # This is likely a manufacturer folder
+                                    manufacturer_name = child.name
+                                    self.logger.info(f"Found manufacturer: {manufacturer_name} with {len(child.children)} plugins")
+                                    
+                                    for plugin in child.children:
+                                        plugin_info = {
+                                            "name": plugin.name,
+                                            "category": f"{category_name}/{manufacturer_name}",
+                                            "is_loadable": plugin.is_loadable,
+                                            "is_instrument": hasattr(plugin, "is_instrument") and plugin.is_instrument,
+                                            "is_effect": hasattr(plugin, "is_effect") and plugin.is_effect,
+                                            "is_plugin": True,
+                                            "manufacturer": manufacturer_name,
+                                            "format": category_name,
+                                            "path": plugin.path if hasattr(plugin, "path") else ""
+                                        }
+                                        vst3_plugins.append(plugin_info)
+                                        self.logger.info(f"Added VST3 plugin: {plugin.name} from {manufacturer_name}")
+                                else:
+                                    # This is likely a direct plugin
+                                    plugin_info = {
+                                        "name": child.name,
+                                        "category": category_name,
+                                        "is_loadable": child.is_loadable,
+                                        "is_instrument": hasattr(child, "is_instrument") and child.is_instrument,
+                                        "is_effect": hasattr(child, "is_effect") and child.is_effect,
+                                        "is_plugin": True,
+                                        "format": category_name,
+                                        "path": child.path if hasattr(child, "path") else ""
+                                    }
+                                    vst3_plugins.append(plugin_info)
+                                    self.logger.info(f"Added direct VST3 plugin: {child.name}")
             
             self.logger.info(f"Found {len(vst3_plugins)} VST3 plugins")
             return json.dumps(vst3_plugins)
