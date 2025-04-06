@@ -1,0 +1,81 @@
+(2025-04-05 20:36:21,916) [INFO] Registered TCP handler for command: GET_VST_PLUGINS
+(2025-04-05 20:36:21,917) [INFO] Registered TCP handler for command: GET_VST2_PLUGINS
+(2025-04-05 20:36:21,917) [INFO] Registered TCP handler for command: GET_VST3_PLUGINS
+(2025-04-05 20:36:21,917) [INFO] Registered TCP handler for command: GET_INSTRUMENT_CATEGORIES
+(2025-04-05 20:36:21,917) [INFO] Registered TCP handler for command: GET_AUDIO_EFFECTS
+(2025-04-05 20:36:21,917) [INFO] Registered TCP handlers for large data transfers
+(2025-04-05 20:36:21,917) [INFO] Started AbletonOSC on address ('0.0.0.0', 11000)
+(2025-04-05 20:36:26,109) [INFO] Getting property for song: tempo = 120.0
+(2025-04-05 20:36:26,214) [INFO] Getting property for song: signature_numerator = 4
+(2025-04-05 20:36:26,326) [INFO] Getting property for song: signature_denominator = 4
+(2025-04-05 20:36:26,434) [INFO] TCP client connected from ('127.0.0.1', 6323)
+(2025-04-05 20:36:26,634) [INFO] TCP request from ('127.0.0.1', 6323): GET_INSTRUMENT_CATEGORIES
+(2025-04-05 20:36:26,742) [INFO] TCP request for all instrument categories
+(2025-04-05 20:36:26,742) [INFO] Getting instrument categories only
+(2025-04-05 20:36:26,843) [INFO] Found instrument section: Instruments with 14 items
+(2025-04-05 20:36:26,844) [INFO] Found instrument section: Drums with 85 items
+(2025-04-05 20:36:27,047) [INFO] Found instrument section: Samples with 3995 items
+(2025-04-05 20:36:27,047) [INFO] Returning 3 instrument categories
+(2025-04-05 20:36:27,367) [INFO] TCP response sent: 247 bytes
+(2025-04-05 20:36:27,368) [INFO] TCP client ('127.0.0.1', 6323) connection closed
+(2025-04-05 20:36:27,476) [INFO] Getting property for track: name = Rev g
+(2025-04-05 20:36:27,575) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:27,683) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:27,792) [INFO] Getting property for track: volume = 0.8500000238418579
+(2025-04-05 20:36:27,892) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:27,992) [INFO] Getting property for track: color = 11958214
+(2025-04-05 20:36:28,192) [INFO] Getting property for device: name = Raum
+(2025-04-05 20:36:28,300) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:28,401) [INFO] Getting property for track: name = Serum Dr
+(2025-04-05 20:36:28,508) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:28,618) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:28,717) [INFO] Getting property for track: volume = 0.4499998092651367
+(2025-04-05 20:36:28,826) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:28,926) [INFO] Getting property for track: color = 11958214
+(2025-04-05 20:36:29,130) [INFO] Getting property for device: name = Serum
+(2025-04-05 20:36:29,238) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:29,343) [INFO] Getting property for track: name = Serum L
+(2025-04-05 20:36:29,451) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:29,551) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:29,659) [INFO] Getting property for track: volume = 0.4499998092651367
+(2025-04-05 20:36:29,759) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:29,859) [INFO] Getting property for track: color = 11958214
+(2025-04-05 20:36:30,059) [INFO] Getting property for device: name = Serum
+(2025-04-05 20:36:30,168) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:30,272) [INFO] Getting property for device: name = Audio Effect Rack
+(2025-04-05 20:36:30,372) [INFO] Getting property for device: class_name = AudioEffectGroupDevice
+(2025-04-05 20:36:30,472) [INFO] Getting property for device: name = EQ Eight
+(2025-04-05 20:36:30,580) [INFO] Getting property for device: class_name = Eq8
+(2025-04-05 20:36:30,688) [INFO] Getting property for track: name = Pad
+(2025-04-05 20:36:30,788) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:30,888) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:30,997) [INFO] Getting property for track: volume = 0.4499998092651367
+(2025-04-05 20:36:31,105) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:31,205) [INFO] Getting property for track: color = 11958214
+(2025-04-05 20:36:31,405) [INFO] Getting property for device: name = Serum
+(2025-04-05 20:36:31,505) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:31,605) [INFO] Getting property for track: name = Bass
+(2025-04-05 20:36:31,713) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:31,813) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:31,913) [INFO] Getting property for track: volume = 0.574942409992218
+(2025-04-05 20:36:32,014) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:32,118) [INFO] Getting property for track: color = 15029152
+(2025-04-05 20:36:32,318) [INFO] Getting property for device: name = Serum
+(2025-04-05 20:36:32,418) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:32,526) [INFO] Getting property for device: name = Saturator
+(2025-04-05 20:36:32,626) [INFO] Getting property for device: class_name = Saturator
+(2025-04-05 20:36:32,726) [INFO] Getting property for device: name = Kickstart 2
+(2025-04-05 20:36:32,834) [INFO] Getting property for device: class_name = PluginDevice
+(2025-04-05 20:36:32,934) [INFO] Getting property for device: name = EQ Eight
+(2025-04-05 20:36:33,043) [INFO] Getting property for device: class_name = Eq8
+(2025-04-05 20:36:33,155) [INFO] Getting property for track: name = Amen break
+(2025-04-05 20:36:33,263) [INFO] Getting property for track: mute = False
+(2025-04-05 20:36:33,363) [INFO] Getting property for track: solo = False
+(2025-04-05 20:36:33,476) [INFO] Getting property for track: volume = 0.4499998092651367
+(2025-04-05 20:36:33,576) [INFO] Getting property for track: panning = 0.0
+(2025-04-05 20:36:33,684) [INFO] Getting property for track: color = 8940772
+(2025-04-05 20:36:33,884) [INFO] Getting property for device: name = Drum - Full Parallel
+(2025-04-05 20:36:33,984) [INFO] Getting property for device: class_name = GlueCompressor
+(2025-04-05 20:36:34,093) [INFO] Getting property for device: name = EQ Eight
+(2025-04-05 20:36:34,205) [INFO] Getting property for device: class_name = Eq8
+(2025-04-05 20:36:46,782) [ERROR] ERROR importing keyboard module: No module named '_ctypes'

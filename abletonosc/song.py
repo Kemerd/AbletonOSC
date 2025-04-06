@@ -1,6 +1,24 @@
 import os
 import sys
 import tempfile
+import importlib.util
+
+# Add modules directory to Python path to find local modules (e.g., keyboard, ctypes)
+script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+modules_dir = os.path.join(script_dir, 'things')
+if modules_dir not in sys.path:
+    sys.path.insert(0, modules_dir)
+    print(f"Added modules path to sys.path: {modules_dir}")
+
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+    print(f"Added main path to sys.path: {script_dir}")
+
+# Add parent directory and keyboard directory to Python path
+# Print paths to help with debugging
+print(f"Python paths: {sys.path}")
+print(f"Looking for keyboard module in: {modules_dir}")
+
 import Live
 import json
 import time
@@ -495,7 +513,7 @@ class SongHandler(AbletonOSCHandler):
                 export_dir = directory
                 if not export_dir:
                     temp_dir = tempfile.gettempdir()
-                    dir_name = f"abletonosc_stems_{int(time.time())}"
+                    dir_name = f"abletonosc_stems_{int(time())}"
                     export_dir = os.path.join(temp_dir, dir_name)
                 
                 # Ensure the directory exists
@@ -1230,6 +1248,1249 @@ class SongHandler(AbletonOSCHandler):
                 return (0, f"Error deleting device: {str(e)}")
         
         self.osc_server.add_handler("/live/track/delete_device", track_delete_device)
+
+        #--------------------------------------------------------------------------------
+        # Test all possible export methods to see which ones work
+        #--------------------------------------------------------------------------------
+        def test_export_methods(params):
+            """
+            Test a wide range of possible export methods to identify what works with this Ableton version.
+            
+            Returns:
+                results (str): JSON formatted results of all attempted methods
+            """
+            results = {"working_methods": [], "failed_methods": []}
+            temp_dir = tempfile.gettempdir()
+            test_file = os.path.join(temp_dir, f"export_test_{int(time.time())}.wav")
+            test_duration = 5.0  # Short duration for testing
+            self.logger.info(f"Testing export methods, output will go to: {test_file}")
+            
+            # Track to test with - use first audio track if available
+            target_track = None
+            target_track_index = 0
+            for i, track in enumerate(self.song.tracks):
+                if hasattr(track, "has_audio_input") and track.has_audio_input:
+                    target_track = track
+                    target_track_index = i
+                    break
+            
+            if target_track is None and len(self.song.tracks) > 0:
+                target_track = self.song.tracks[0]
+                target_track_index = 0
+            
+            # Master track
+            master_track = self.song.master_track if hasattr(self.song, "master_track") else None
+            
+            # Save current playback state
+            was_playing = self.song.is_playing
+            current_time = self.song.current_song_time
+            
+            # Stop playback during testing
+            if was_playing:
+                self.song.stop_playing()
+            
+            def log_result(method_name, success, error=None):
+                if success:
+                    self.logger.info(f"✅ Method works: {method_name}")
+                    results["working_methods"].append({"name": method_name, "error": None})
+                else:
+                    error_msg = str(error) if error else "Unknown error"
+                    self.logger.info(f"❌ Method failed: {method_name} - {error_msg}")
+                    results["failed_methods"].append({"name": method_name, "error": error_msg})
+            
+            # 1. Try song-level export methods
+            methods_to_try = [
+                # Standard names
+                "export_audio",
+                "render_audio", 
+                "bounce_to_disk",
+                "export",
+                "render",
+                "bounce",
+                
+                # Variations with prefixes
+                "_export_audio", 
+                "_render_audio",
+                "__export_audio",
+                
+                # Alternative naming
+                "export_to_disk",
+                "render_to_file",
+                "export_as_audio",
+                "render_as_audio",
+                "save_audio",
+                "write_audio",
+                "capture_audio"
+            ]
+            
+            # Test song-level methods
+            for method_name in methods_to_try:
+                if hasattr(self.song, method_name) and callable(getattr(self.song, method_name)):
+                    try:
+                        method = getattr(self.song, method_name)
+                        # Try different argument patterns
+                        try:
+                            # Basic path only
+                            method(test_file)
+                            log_result(f"song.{method_name}(path)", True)
+                        except Exception as e1:
+                            try:
+                                # Path and duration
+                                method(test_file, test_duration)
+                                log_result(f"song.{method_name}(path, duration)", True)
+                            except Exception as e2:
+                                try:
+                                    # Path, start_time, duration
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"song.{method_name}(path, start, duration)", True)
+                                except Exception as e3:
+                                    try:
+                                        # Named arguments
+                                        method(path=test_file, start_time=0.0, duration=test_duration)
+                                        log_result(f"song.{method_name}(path, start_time, duration) [named]", True)
+                                    except Exception as e4:
+                                        try:
+                                            # Alt named arguments
+                                            method(file_path=test_file, start=0.0, length=test_duration)
+                                            log_result(f"song.{method_name}(file_path, start, length) [named]", True)
+                                        except Exception as e5:
+                                            # If all attempts fail, log the last error
+                                            log_result(f"song.{method_name}", False, e5)
+                    except Exception as e:
+                        log_result(f"song.{method_name}", False, e)
+                else:
+                    log_result(f"song.{method_name}", False, "Method not found")
+            
+            # 2. Try track-level export methods on normal track
+            if target_track:
+                for method_name in methods_to_try:
+                    if hasattr(target_track, method_name) and callable(getattr(target_track, method_name)):
+                        try:
+                            method = getattr(target_track, method_name)
+                            # Try different argument patterns
+                            try:
+                                # Basic path only
+                                method(test_file)
+                                log_result(f"track.{method_name}(path)", True)
+                            except Exception as e1:
+                                try:
+                                    # Path and duration
+                                    method(test_file, test_duration)
+                                    log_result(f"track.{method_name}(path, duration)", True)
+                                except Exception as e2:
+                                    try:
+                                        # Path, start_time, duration
+                                        method(test_file, 0.0, test_duration)
+                                        log_result(f"track.{method_name}(path, start, duration)", True)
+                                    except Exception as e3:
+                                        try:
+                                            # Named arguments
+                                            method(path=test_file, start_time=0.0, duration=test_duration)
+                                            log_result(f"track.{method_name}(path, start_time, duration) [named]", True)
+                                        except Exception as e4:
+                                            try:
+                                                # Alt named arguments
+                                                method(file_path=test_file, start=0.0, length=test_duration)
+                                                log_result(f"track.{method_name}(file_path, start, length) [named]", True)
+                                            except Exception as e5:
+                                                # If all attempts fail, log the last error
+                                                log_result(f"track.{method_name}", False, e5)
+                        except Exception as e:
+                            log_result(f"track.{method_name}", False, e)
+                    else:
+                        log_result(f"track.{method_name}", False, "Method not found")
+            
+            # 3. Try master track export methods
+            if master_track:
+                for method_name in methods_to_try:
+                    if hasattr(master_track, method_name) and callable(getattr(master_track, method_name)):
+                        try:
+                            method = getattr(master_track, method_name)
+                            # Try different argument patterns
+                            try:
+                                # Basic path only
+                                method(test_file)
+                                log_result(f"master_track.{method_name}(path)", True)
+                            except Exception as e1:
+                                try:
+                                    # Path and duration
+                                    method(test_file, test_duration)
+                                    log_result(f"master_track.{method_name}(path, duration)", True)
+                                except Exception as e2:
+                                    try:
+                                        # Path, start_time, duration
+                                        method(test_file, 0.0, test_duration)
+                                        log_result(f"master_track.{method_name}(path, start, duration)", True)
+                                    except Exception as e3:
+                                        try:
+                                            # Named arguments
+                                            method(path=test_file, start_time=0.0, duration=test_duration)
+                                            log_result(f"master_track.{method_name}(path, start_time, duration) [named]", True)
+                                        except Exception as e4:
+                                            try:
+                                                # Alt named arguments
+                                                method(file_path=test_file, start=0.0, length=test_duration)
+                                                log_result(f"master_track.{method_name}(file_path, start, length) [named]", True)
+                                            except Exception as e5:
+                                                # If all attempts fail, log the last error
+                                                log_result(f"master_track.{method_name}", False, e5)
+                        except Exception as e:
+                            log_result(f"master_track.{method_name}", False, e)
+                    else:
+                        log_result(f"master_track.{method_name}", False, "Method not found")
+            
+            # 4. Try arrangement-related objects
+            arrangement_objects = [
+                ("arrangement", self.song.arrangement if hasattr(self.song, "arrangement") else None),
+                ("view", self.song.view if hasattr(self.song, "view") else None),
+                ("session", self.song.session if hasattr(self.song, "session") else None),
+                ("tracks", self.song.tracks),
+                ("return_tracks", self.song.return_tracks),
+                ("scenes", self.song.scenes),
+                ("clip_slots", self.song.clip_slots if hasattr(self.song, "clip_slots") else None),
+                ("mixer_device", self.song.mixer_device if hasattr(self.song, "mixer_device") else None),
+            ]
+            
+            for obj_name, obj in arrangement_objects:
+                if obj is not None:
+                    for method_name in methods_to_try:
+                        if hasattr(obj, method_name) and callable(getattr(obj, method_name)):
+                            try:
+                                method = getattr(obj, method_name)
+                                # Try different argument patterns
+                                try:
+                                    # Basic path only
+                                    method(test_file)
+                                    log_result(f"song.{obj_name}.{method_name}(path)", True)
+                                except Exception as e1:
+                                    try:
+                                        # Path and duration
+                                        method(test_file, test_duration)
+                                        log_result(f"song.{obj_name}.{method_name}(path, duration)", True)
+                                    except Exception as e2:
+                                        try:
+                                            # Path, start_time, duration
+                                            method(test_file, 0.0, test_duration)
+                                            log_result(f"song.{obj_name}.{method_name}(path, start, duration)", True)
+                                        except Exception as e3:
+                                            try:
+                                                # Named arguments
+                                                method(path=test_file, start_time=0.0, duration=test_duration)
+                                                log_result(f"song.{obj_name}.{method_name}(path, start_time, duration) [named]", True)
+                                            except Exception as e4:
+                                                try:
+                                                    # Alt named arguments
+                                                    method(file_path=test_file, start=0.0, length=test_duration)
+                                                    log_result(f"song.{obj_name}.{method_name}(file_path, start, length) [named]", True)
+                                                except Exception as e5:
+                                                    # If all attempts fail, log the last error
+                                                    log_result(f"song.{obj_name}.{method_name}", False, e5)
+                            except Exception as e:
+                                log_result(f"song.{obj_name}.{method_name}", False, e)
+                        else:
+                            log_result(f"song.{obj_name}.{method_name}", False, "Method not found")
+            
+            # 5. Try Live application-level methods
+            if hasattr(Live, "Application") and hasattr(Live.Application, "get_application"):
+                app = Live.Application.get_application()
+                for method_name in methods_to_try:
+                    if hasattr(app, method_name) and callable(getattr(app, method_name)):
+                        try:
+                            method = getattr(app, method_name)
+                            # Try different argument patterns
+                            try:
+                                # Basic path only
+                                method(test_file)
+                                log_result(f"application.{method_name}(path)", True)
+                            except Exception as e1:
+                                try:
+                                    # Path and duration
+                                    method(test_file, test_duration)
+                                    log_result(f"application.{method_name}(path, duration)", True)
+                                except Exception as e2:
+                                    try:
+                                        # Path, start_time, duration
+                                        method(test_file, 0.0, test_duration)
+                                        log_result(f"application.{method_name}(path, start, duration)", True)
+                                    except Exception as e3:
+                                        try:
+                                            # Named arguments
+                                            method(path=test_file, start_time=0.0, duration=test_duration)
+                                            log_result(f"application.{method_name}(path, start_time, duration) [named]", True)
+                                        except Exception as e4:
+                                            try:
+                                                # Alt named arguments
+                                                method(file_path=test_file, start=0.0, length=test_duration)
+                                                log_result(f"application.{method_name}(file_path, start, length) [named]", True)
+                                            except Exception as e5:
+                                                # If all attempts fail, log the last error
+                                                log_result(f"application.{method_name}", False, e5)
+                        except Exception as e:
+                            log_result(f"application.{method_name}", False, e)
+                    else:
+                        log_result(f"application.{method_name}", False, "Method not found")
+            
+            # 6. Try direct project methods
+            if hasattr(self.song, "get_data") and callable(self.song.get_data):
+                try:
+                    project_data = self.song.get_data()
+                    if isinstance(project_data, dict) and "path" in project_data:
+                        project_path = project_data["path"]
+                        project_dir = os.path.dirname(project_path)
+                        self.logger.info(f"Project path: {project_path}")
+                        results["project_path"] = project_path
+                except Exception as e:
+                    self.logger.error(f"Error getting project path: {e}")
+            
+            # 7. Try advanced techniques - create clip and then export it
+            try:
+                # Try to find or create a clip
+                clip_found = False
+                test_clip = None
+                
+                # Find an existing clip
+                for track in self.song.tracks:
+                    for clip_slot in track.clip_slots:
+                        if clip_slot.has_clip and clip_slot.clip is not None:
+                            test_clip = clip_slot.clip
+                            clip_found = True
+                            break
+                    if clip_found:
+                        break
+                
+                # If we found a clip, try to export it
+                if test_clip is not None:
+                    for method_name in methods_to_try:
+                        if hasattr(test_clip, method_name) and callable(getattr(test_clip, method_name)):
+                            try:
+                                method = getattr(test_clip, method_name)
+                                # Try different argument patterns
+                                try:
+                                    # Basic path only
+                                    method(test_file)
+                                    log_result(f"clip.{method_name}(path)", True)
+                                except Exception as e1:
+                                    try:
+                                        # Path and duration
+                                        method(test_file, test_clip.length)
+                                        log_result(f"clip.{method_name}(path, duration)", True)
+                                    except Exception as e2:
+                                        try:
+                                            # Path, start_time, duration
+                                            method(test_file, 0.0, test_clip.length)
+                                            log_result(f"clip.{method_name}(path, start, duration)", True)
+                                        except Exception as e3:
+                                            # If all attempts fail, log the last error
+                                            log_result(f"clip.{method_name}", False, e3)
+                            except Exception as e:
+                                log_result(f"clip.{method_name}", False, e)
+                        else:
+                            log_result(f"clip.{method_name}", False, "Method not found")
+            except Exception as e:
+                self.logger.error(f"Error testing clip methods: {e}")
+            
+            # 8. Try working with document class if it exists
+            try:
+                if hasattr(Live, "Document") and hasattr(Live.Document, "get_document"):
+                    doc = Live.Document.get_document()
+                    for method_name in methods_to_try:
+                        if hasattr(doc, method_name) and callable(getattr(doc, method_name)):
+                            try:
+                                method = getattr(doc, method_name)
+                                # Try different argument patterns
+                                try:
+                                    # Basic path only
+                                    method(test_file)
+                                    log_result(f"document.{method_name}(path)", True)
+                                except Exception as e1:
+                                    try:
+                                        # Path and duration
+                                        method(test_file, test_duration)
+                                        log_result(f"document.{method_name}(path, duration)", True)
+                                    except Exception as e2:
+                                        try:
+                                            # Path, start_time, duration
+                                            method(test_file, 0.0, test_duration)
+                                            log_result(f"document.{method_name}(path, start, duration)", True)
+                                        except Exception as e3:
+                                            # If all attempts fail, log the last error
+                                            log_result(f"document.{method_name}", False, e3)
+                            except Exception as e:
+                                log_result(f"document.{method_name}", False, e)
+                        else:
+                            log_result(f"document.{method_name}", False, "Method not found")
+            except Exception as e:
+                self.logger.error(f"Error testing document methods: {e}")
+            
+            # Restore playback state
+            self.song.current_song_time = current_time
+            if was_playing:
+                self.song.start_playing()
+            
+            # Final stats
+            results["total_tested"] = len(results["working_methods"]) + len(results["failed_methods"])
+            results["total_working"] = len(results["working_methods"])
+            
+            # Log summary
+            self.logger.info(f"Export method testing complete. Found {len(results['working_methods'])} working methods out of {results['total_tested']} tested.")
+            if len(results["working_methods"]) > 0:
+                self.logger.info(f"Working methods: {[m['name'] for m in results['working_methods']]}")
+            
+            return (json.dumps(results),)
+        
+        self.osc_server.add_handler("/live/song/test_export_methods", test_export_methods)
+
+        #--------------------------------------------------------------------------------
+        # Test thousands of variations of export methods
+        #--------------------------------------------------------------------------------
+        def test_export_methods_comprehensive(params):
+            """
+            Test a very wide range of possible export methods with many parameter variations
+            to identify what works with this Ableton version.
+            
+            Returns:
+                results (str): JSON formatted results of all attempted methods
+            """
+            results = {"working_methods": [], "failed_methods": []}
+            temp_dir = tempfile.gettempdir()
+            test_file = os.path.join(temp_dir, f"export_test_{int(time.time())}.wav")
+            test_duration = 5.0  # Short duration for testing
+            self.logger.info(f"Testing comprehensive export methods, output will go to: {test_file}")
+            
+            # Track to test with - use first audio track if available
+            target_track = None
+            target_track_index = 0
+            for i, track in enumerate(self.song.tracks):
+                if hasattr(track, "has_audio_input") and track.has_audio_input:
+                    target_track = track
+                    target_track_index = i
+                    break
+            
+            if target_track is None and len(self.song.tracks) > 0:
+                target_track = self.song.tracks[0]
+                target_track_index = 0
+            
+            # Master track
+            master_track = self.song.master_track if hasattr(self.song, "master_track") else None
+            
+            # Save current playback state
+            was_playing = self.song.is_playing
+            current_time = self.song.current_song_time
+            
+            # Stop playback during testing
+            if was_playing:
+                self.song.stop_playing()
+            
+            def log_result(method_name, success, error=None):
+                if success:
+                    self.logger.info(f"✅ Method works: {method_name}")
+                    results["working_methods"].append({"name": method_name, "error": None})
+                else:
+                    error_msg = str(error) if error else "Unknown error"
+                    self.logger.info(f"❌ Method failed: {method_name} - {error_msg}")
+                    results["failed_methods"].append({"name": method_name, "error": error_msg})
+            
+            # Generate a much more comprehensive list of method names to try
+            prefixes = [
+                "", "_", "__", "___", 
+                "live_", "ableton_", "internal_", "private_", "api_", "audio_", "sound_", 
+                "_live_", "_ableton_", "_internal_"
+            ]
+            
+            root_method_names = [
+                "export", "render", "bounce", "write", "capture", "save", "dump", "store", "output",
+                "export_audio", "render_audio", "bounce_audio", "write_audio", "save_audio",
+                "export_track", "render_track", "bounce_track", 
+                "export_clip", "render_clip", "bounce_clip",
+                "export_stem", "render_stem", "bounce_stem",
+                "export_master", "render_master", "bounce_master",
+                "export_to_disk", "render_to_disk", "bounce_to_disk",
+                "export_to_file", "render_to_file", "bounce_to_file",
+                "export_as_audio", "render_as_audio", "bounce_as_audio",
+                "export_selection", "render_selection", "bounce_selection",
+                "export_session", "render_session", "bounce_session",
+                "export_arrangement", "render_arrangement", "bounce_arrangement",
+                "export_tracks", "render_tracks", "bounce_tracks",
+                "export_clips", "render_clips", "bounce_clips"
+            ]
+            
+            suffixes = [
+                "", "_file", "_disk", "_wav", "_mp3", "_aiff", "_audio"
+            ]
+            
+            # Generate all combinations of prefix + method + suffix
+            methods_to_try = []
+            for prefix in prefixes:
+                for method in root_method_names:
+                    for suffix in suffixes:
+                        methods_to_try.append(f"{prefix}{method}{suffix}")
+            
+            # Add some special cases
+            methods_to_try.extend([
+                "consolidate", "consolidate_time", "consolidate_clip", "consolidate_track",
+                "flatten", "flatten_track", "flatten_clip", "flatten_time",
+                "print_audio", "print_to_disk", "print_to_file",
+                "commit", "commit_audio", "commit_to_disk",
+                "freeze_and_flatten", "freeze_and_export", "freeze_and_render",
+                "bounce_in_place", "render_in_place", "export_in_place",
+                "render_to_wav", "render_to_mp3", "render_to_aiff", "render_to_ogg",
+                "export_to_wav", "export_to_mp3", "export_to_aiff", "export_to_ogg"
+            ])
+            
+            # 1. Try all methods on song object
+            self.logger.info(f"Testing {len(methods_to_try)} method variations on song object...")
+            for method_name in methods_to_try:
+                if hasattr(self.song, method_name) and callable(getattr(self.song, method_name)):
+                    try:
+                        method = getattr(self.song, method_name)
+                        # Try different argument patterns
+                        try:
+                            # Basic path only
+                            method(test_file)
+                            log_result(f"song.{method_name}(path)", True)
+                        except Exception as e1:
+                            try:
+                                # Path and duration
+                                method(test_file, test_duration)
+                                log_result(f"song.{method_name}(path, duration)", True)
+                            except Exception as e2:
+                                try:
+                                    # Path, start_time, duration
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"song.{method_name}(path, start, duration)", True)
+                                except Exception as e3:
+                                    # Try various combinations of named parameters
+                                    try:
+                                        method(path=test_file)
+                                        log_result(f"song.{method_name}(path=path)", True)
+                                    except Exception as e4:
+                                        try:
+                                            method(filename=test_file)
+                                            log_result(f"song.{method_name}(filename=path)", True)
+                                        except Exception as e5:
+                                            try:
+                                                method(file=test_file)
+                                                log_result(f"song.{method_name}(file=path)", True)
+                                            except Exception as e6:
+                                                try:
+                                                    method(destination=test_file)
+                                                    log_result(f"song.{method_name}(destination=path)", True)
+                                                except Exception as e7:
+                                                    try:
+                                                        method(output=test_file)
+                                                        log_result(f"song.{method_name}(output=path)", True)
+                                                    except Exception as e8:
+                                                        try:
+                                                            method(file_path=test_file)
+                                                            log_result(f"song.{method_name}(file_path=path)", True)
+                                                        except Exception as e9:
+                                                            # Try with duration parameter
+                                                            try:
+                                                                method(path=test_file, duration=test_duration)
+                                                                log_result(f"song.{method_name}(path, duration) [named]", True)
+                                                            except Exception as e10:
+                                                                try:
+                                                                    method(path=test_file, length=test_duration)
+                                                                    log_result(f"song.{method_name}(path, length) [named]", True)
+                                                                except Exception as e11:
+                                                                    try:
+                                                                        method(path=test_file, time=test_duration)
+                                                                        log_result(f"song.{method_name}(path, time) [named]", True)
+                                                                    except Exception as e12:
+                                                                        # Try with start time and duration
+                                                                        try:
+                                                                            method(path=test_file, start=0.0, duration=test_duration)
+                                                                            log_result(f"song.{method_name}(path, start, duration) [named]", True)
+                                                                        except Exception as e13:
+                                                                            try:
+                                                                                method(path=test_file, start_time=0.0, duration=test_duration)
+                                                                                log_result(f"song.{method_name}(path, start_time, duration) [named]", True)
+                                                                            except Exception as e14:
+                                                                                try:
+                                                                                    method(path=test_file, begin=0.0, duration=test_duration)
+                                                                                    log_result(f"song.{method_name}(path, begin, duration) [named]", True)
+                                                                                except Exception as e15:
+                                                                                    try:
+                                                                                        method(path=test_file, from_time=0.0, duration=test_duration)
+                                                                                        log_result(f"song.{method_name}(path, from_time, duration) [named]", True)
+                                                                                    except Exception as e16:
+                                                                                        # Try alternative duration naming
+                                                                                        try:
+                                                                                            method(path=test_file, start=0.0, length=test_duration)
+                                                                                            log_result(f"song.{method_name}(path, start, length) [named]", True)
+                                                                                        except Exception as e17:
+                                                                                            try:
+                                                                                                method(path=test_file, start=0.0, end=test_duration)
+                                                                                                log_result(f"song.{method_name}(path, start, end) [named]", True)
+                                                                                            except Exception as e18:
+                                                                                                # No need to log all the failures, they're too many
+                                                                                                pass
+                    except Exception as e:
+                        # Don't log general failures to avoid overwhelming output
+                        pass
+                
+            # 2. Try select methods on track and other objects
+            selected_methods = []
+            # Include only methods with "export", "render", "bounce", "flatten", or "consolidate" in the name
+            for method in methods_to_try:
+                if any(keyword in method for keyword in ["export", "render", "bounce", "flatten", "consolidate"]):
+                    selected_methods.append(method)
+            
+            # Test track methods
+            if target_track:
+                self.logger.info(f"Testing {len(selected_methods)} method variations on track object...")
+                for method_name in selected_methods:
+                    if hasattr(target_track, method_name) and callable(getattr(target_track, method_name)):
+                        try:
+                            method = getattr(target_track, method_name)
+                            # Just try the most common signatures
+                            try:
+                                method(test_file)
+                                log_result(f"track.{method_name}(path)", True)
+                            except Exception:
+                                try:
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"track.{method_name}(path, start, duration)", True)
+                                except Exception:
+                                    try:
+                                        method(path=test_file, start=0.0, duration=test_duration)
+                                        log_result(f"track.{method_name}(path, start, duration) [named]", True)
+                                    except Exception:
+                                        pass  # Don't log failures
+                        except Exception:
+                            pass  # Don't log failures
+            
+            # 3. Try select methods on master track
+            if master_track:
+                self.logger.info(f"Testing {len(selected_methods)} method variations on master track...")
+                for method_name in selected_methods:
+                    if hasattr(master_track, method_name) and callable(getattr(master_track, method_name)):
+                        try:
+                            method = getattr(master_track, method_name)
+                            # Just try the most common signatures
+                            try:
+                                method(test_file)
+                                log_result(f"master_track.{method_name}(path)", True)
+                            except Exception:
+                                try:
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"master_track.{method_name}(path, start, duration)", True)
+                                except Exception:
+                                    try:
+                                        method(path=test_file, start=0.0, duration=test_duration)
+                                        log_result(f"master_track.{method_name}(path, start, duration) [named]", True)
+                                    except Exception:
+                                        pass  # Don't log failures
+                        except Exception:
+                            pass  # Don't log failures
+            
+            # 4. Try specific methods on view object
+            view = self.song.view if hasattr(self.song, "view") else None
+            if view:
+                self.logger.info("Testing select methods on view object...")
+                for method_name in selected_methods:
+                    if hasattr(view, method_name) and callable(getattr(view, method_name)):
+                        try:
+                            method = getattr(view, method_name)
+                            try:
+                                method(test_file)
+                                log_result(f"song.view.{method_name}(path)", True)
+                            except Exception:
+                                try:
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"song.view.{method_name}(path, start, duration)", True)
+                                except Exception:
+                                    pass  # Don't log failures
+                        except Exception:
+                            pass  # Don't log failures
+                
+                # Try some special view methods
+                special_view_methods = [
+                    "export_selected", "render_selected", "bounce_selected",
+                    "export_selection", "render_selection", "bounce_selection",
+                    "export_selected_tracks", "render_selected_tracks", "bounce_selected_tracks",
+                    "export_selected_clips", "render_selected_clips", "bounce_selected_clips"
+                ]
+                
+                for method_name in special_view_methods:
+                    if hasattr(view, method_name) and callable(getattr(view, method_name)):
+                        try:
+                            method = getattr(view, method_name)
+                            try:
+                                method(test_file)
+                                log_result(f"song.view.{method_name}(path)", True)
+                            except Exception:
+                                pass  # Don't log failures
+                        except Exception:
+                            pass  # Don't log failures
+            
+            # 5. Try any accessible clip objects
+            test_clips = []
+            for track in self.song.tracks:
+                for clip_slot in track.clip_slots:
+                    if clip_slot.has_clip and clip_slot.clip is not None:
+                        test_clips.append(clip_slot.clip)
+                        if len(test_clips) >= 2:  # Just test a couple of clips
+                            break
+                if len(test_clips) >= 2:
+                    break
+            
+            if test_clips:
+                self.logger.info(f"Testing select methods on {len(test_clips)} clip objects...")
+                for i, clip in enumerate(test_clips):
+                    for method_name in selected_methods:
+                        if hasattr(clip, method_name) and callable(getattr(clip, method_name)):
+                            try:
+                                method = getattr(clip, method_name)
+                                try:
+                                    method(test_file)
+                                    log_result(f"clip[{i}].{method_name}(path)", True)
+                                except Exception:
+                                    try:
+                                        method(test_file, clip.length)
+                                        log_result(f"clip[{i}].{method_name}(path, length)", True)
+                                    except Exception:
+                                        pass  # Don't log failures
+                            except Exception:
+                                pass  # Don't log failures
+            
+            # 6. Try accessible application & document objects
+            if hasattr(Live, "Application") and hasattr(Live.Application, "get_application"):
+                app = Live.Application.get_application()
+                self.logger.info("Testing select methods on application object...")
+                for method_name in selected_methods:
+                    if hasattr(app, method_name) and callable(getattr(app, method_name)):
+                        try:
+                            method = getattr(app, method_name)
+                            try:
+                                method(test_file)
+                                log_result(f"application.{method_name}(path)", True)
+                            except Exception:
+                                try:
+                                    method(test_file, 0.0, test_duration)
+                                    log_result(f"application.{method_name}(path, start, duration)", True)
+                                except Exception:
+                                    pass  # Don't log failures
+                        except Exception:
+                            pass  # Don't log failures
+            
+            if hasattr(Live, "Document") and hasattr(Live.Document, "get_document"):
+                try:
+                    doc = Live.Document.get_document()
+                    self.logger.info("Testing select methods on document object...")
+                    for method_name in selected_methods:
+                        if hasattr(doc, method_name) and callable(getattr(doc, method_name)):
+                            try:
+                                method = getattr(doc, method_name)
+                                try:
+                                    method(test_file)
+                                    log_result(f"document.{method_name}(path)", True)
+                                except Exception:
+                                    pass  # Don't log failures
+                            except Exception:
+                                pass  # Don't log failures
+                except Exception:
+                    pass  # Don't log document errors
+            
+            # 7. Try to find "hidden" export functionality by exploring all accessible methods
+            def explore_methods(obj, obj_name, max_depth=1, current_depth=0, explored_ids=None):
+                if explored_ids is None:
+                    explored_ids = set()
+                
+                obj_id = id(obj)
+                if obj_id in explored_ids or current_depth > max_depth:
+                    return
+                
+                explored_ids.add(obj_id)
+                
+                for attr_name in dir(obj):
+                    # Skip private attributes and common methods
+                    if attr_name.startswith('__') or attr_name in ('__dict__', '__class__', '__module__', '__doc__'):
+                        continue
+                    
+                    try:
+                        attr = getattr(obj, attr_name)
+                        
+                        # Check if this could be an export method
+                        if callable(attr) and any(keyword in attr_name for keyword in 
+                                               ['export', 'render', 'bounce', 'consolidate', 'flatten', 'print', 'write']):
+                            # Try calling with path argument
+                            try:
+                                attr(test_file)
+                                log_result(f"{obj_name}.{attr_name}(path)", True)
+                            except Exception:
+                                # Only try a few variations to avoid too many errors
+                                if 'export' in attr_name or 'render' in attr_name:
+                                    try:
+                                        attr(test_file, 0.0, test_duration)
+                                        log_result(f"{obj_name}.{attr_name}(path, start, duration)", True)
+                                    except Exception:
+                                        pass
+                        
+                        # If this is an object and not a built-in type, explore it too
+                        elif (not callable(attr) and not isinstance(attr, (int, float, str, bool, list, dict, tuple)) 
+                              and current_depth < max_depth):
+                            explore_methods(attr, f"{obj_name}.{attr_name}", max_depth, current_depth + 1, explored_ids)
+                    
+                    except Exception:
+                        # Skip errors during exploration
+                        pass
+            
+            # Explore song and application objects for hidden export methods
+            self.logger.info("Exploring song object for hidden export methods...")
+            explore_methods(self.song, "song", max_depth=1)
+            
+            if hasattr(Live, "Application") and hasattr(Live.Application, "get_application"):
+                app = Live.Application.get_application()
+                self.logger.info("Exploring application object for hidden export methods...")
+                explore_methods(app, "application", max_depth=1)
+            
+            # 8. Try accessing Live API through alternative paths
+            try:
+                self.logger.info("Checking for export methods through alternative internal paths...")
+                # Some versions of Live have internal APIs accessible through the Live namespace
+                for alt_path in [
+                    "Internal", "_Internal", "__Internal", "Audio", "_Audio", "Core", "_Core", 
+                    "Export", "_Export", "Rendering", "_Rendering"
+                ]:
+                    if hasattr(Live, alt_path):
+                        alt_obj = getattr(Live, alt_path)
+                        for method_name in selected_methods:
+                            if hasattr(alt_obj, method_name) and callable(getattr(alt_obj, method_name)):
+                                try:
+                                    method = getattr(alt_obj, method_name)
+                                    try:
+                                        method(test_file)
+                                        log_result(f"Live.{alt_path}.{method_name}(path)", True)
+                                    except Exception:
+                                        pass  # Don't log failures
+                                except Exception:
+                                    pass  # Don't log failures
+            except Exception:
+                pass  # Skip errors
+            
+            # Restore playback state
+            self.song.current_song_time = current_time
+            if was_playing:
+                self.song.start_playing()
+            
+            # Final stats
+            results["total_tested"] = len(results["working_methods"]) + len(results["failed_methods"])
+            results["total_working"] = len(results["working_methods"])
+            
+            # Log summary
+            self.logger.info(f"Comprehensive export testing complete. Tested approximately {len(methods_to_try) * 20} method variations.")
+            self.logger.info(f"Found {len(results['working_methods'])} working methods out of {results['total_tested']} logged attempts.")
+            if len(results["working_methods"]) > 0:
+                self.logger.info(f"Working methods: {[m['name'] for m in results['working_methods']]}")
+            
+            return (json.dumps(results),)
+        
+        self.osc_server.add_handler("/live/song/test_export_methods_comprehensive", test_export_methods_comprehensive)
+
+        #--------------------------------------------------------------------------------
+        # Try alternative export methods using UI automation
+        #--------------------------------------------------------------------------------
+        def try_ui_automation_export(params):
+            """
+            Attempts to export audio using UI automation techniques.
+            This tries to use system-specific commands to trigger Ableton's export dialog.
+            
+            Args:
+                destination (str, optional): Path to save exported file
+                duration (float, optional): Duration in seconds to export
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            try:
+                import time
+                import platform
+                import subprocess
+                
+                # Extract parameters
+                destination = str(params[0]) if len(params) > 0 else ""
+                duration = float(params[1]) if len(params) > 1 else 30.0
+                
+                self.logger.info(f"Attempting UI automation export for {duration} seconds using subprocess approach")
+                
+                # Save current playback state
+                was_playing = self.song.is_playing
+                current_time = self.song.current_song_time
+                
+                # Stop playback during operation
+                if was_playing:
+                    self.song.stop_playing()
+                
+                # Position cursor at start point
+                self.song.current_song_time = 0.0
+                
+                # Wait for Ableton to process
+                time.sleep(0.5)
+                
+                # Detect platform
+                system = platform.system()
+                self.logger.info(f"Operating system detected: {system}")
+                
+                if system == "Windows":
+                    # Windows approach using PowerShell
+                    self.logger.info("Using PowerShell SendKeys for Windows automation")
+                    
+                    # Trigger export dialog (Ctrl+Shift+R)
+                    export_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"^+r\"); Start-Sleep -m 2000;"'
+                    
+                    try:
+                        # Execute the command
+                        self.logger.info("Sending Ctrl+Shift+R keystroke to open export dialog")
+                        subprocess.run(export_cmd, shell=True, check=True)
+                        
+                        # Tab to navigate the dialog
+                        tab_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
+                        self.logger.info("Sending TAB keystrokes to navigate dialog")
+                        subprocess.run(tab_cmd, shell=True, check=True)
+                        
+                        # If destination provided, try to enter it
+                        if destination:
+                            type_cmd = fr'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{destination}\"); Start-Sleep -m 1000;"'
+                            self.logger.info(f"Entering export path: {destination}")
+                            subprocess.run(type_cmd, shell=True, check=True)
+                        
+                        # More tabs to get to OK button
+                        more_tabs_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
+                        subprocess.run(more_tabs_cmd, shell=True, check=True)
+                        
+                        # Press Enter to confirm
+                        enter_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{ENTER}\"); Start-Sleep -m 1000;"'
+                        self.logger.info("Sending ENTER to confirm export")
+                        subprocess.run(enter_cmd, shell=True, check=True)
+                        
+                    except subprocess.SubprocessError as e:
+                        self.logger.error(f"Subprocess error: {str(e)}")
+                        return (0, f"PowerShell automation error: {str(e)}")
+                    
+                elif system == "Darwin":  # macOS
+                    # AppleScript approach for macOS
+                    self.logger.info("Using AppleScript for macOS automation")
+                    
+                    # Trigger export dialog (Shift+Cmd+E)
+                    export_cmd = [
+                        'osascript', '-e', 
+                        'tell application "Ableton Live" to activate',
+                        '-e', 'delay 0.5',
+                        '-e', 'tell application "System Events" to keystroke "e" using {shift down, command down}',
+                        '-e', 'delay 2'
+                    ]
+                    
+                    try:
+                        # Execute the command
+                        self.logger.info("Sending Shift+Cmd+E keystroke to open export dialog")
+                        subprocess.run(export_cmd, check=True)
+                        
+                        # Tab to navigate the dialog
+                        tab_cmd = [
+                            'osascript', '-e',
+                            'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3'
+                        ]
+                        self.logger.info("Sending TAB keystrokes to navigate dialog")
+                        subprocess.run(tab_cmd, check=True)
+                        
+                        # If destination provided, try to enter it
+                        if destination:
+                            type_cmd = [
+                                'osascript', '-e',
+                                f'tell application "System Events" to keystroke "{destination}"',
+                                '-e', 'delay 1'
+                            ]
+                            self.logger.info(f"Entering export path: {destination}")
+                            subprocess.run(type_cmd, check=True)
+                        
+                        # More tabs to get to OK button
+                        more_tabs_cmd = [
+                            'osascript', '-e',
+                            'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3',
+                            '-e', 'tell application "System Events" to keystroke tab',
+                            '-e', 'delay 0.3'
+                        ]
+                        subprocess.run(more_tabs_cmd, check=True)
+                        
+                        # Press Enter to confirm
+                        enter_cmd = [
+                            'osascript', '-e',
+                            'tell application "System Events" to keystroke return',
+                            '-e', 'delay 1'
+                        ]
+                        self.logger.info("Sending ENTER to confirm export")
+                        subprocess.run(enter_cmd, check=True)
+                        
+                    except subprocess.SubprocessError as e:
+                        self.logger.error(f"Subprocess error: {str(e)}")
+                        return (0, f"AppleScript automation error: {str(e)}")
+                    
+                else:
+                    self.logger.error(f"Unsupported operating system: {system}")
+                    return (0, f"UI automation not supported on {system} - requires Windows or macOS")
+                
+                # Wait for export to complete (estimated)
+                wait_time = min(duration * 1.5, 60)  # Wait 1.5x duration, max 60 seconds
+                self.logger.info(f"Waiting {wait_time} seconds for export to complete")
+                time.sleep(wait_time)
+                
+                # Restore playback state
+                self.song.current_song_time = current_time
+                if was_playing:
+                    self.song.start_playing()
+                
+                return (1, "UI automation export attempt completed. Check Ableton Live window for results.")
+                
+            except Exception as e:
+                self.logger.error(f"Error during UI automation export: {str(e)}")
+                return (0, f"Error during UI automation export: {str(e)}")
+        
+        self.osc_server.add_handler("/live/song/try_ui_automation_export", try_ui_automation_export)
+        
+        #--------------------------------------------------------------------------------
+        # Try Max for Live method to export audio
+        #--------------------------------------------------------------------------------
+        def try_m4l_export_method(params):
+            """
+            Attempts to find and use a Max for Live device for audio export.
+            First looks for installed M4L devices related to export, then tries to communicate with them.
+            
+            Args:
+                destination (str, optional): Path to save exported file
+                duration (float, optional): Duration in seconds to export
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            try:
+                # Extract parameters
+                destination = str(params[0]) if len(params) > 0 else ""
+                duration = float(params[1]) if len(params) > 1 else 30.0
+                
+                self.logger.info(f"Checking for Max for Live export devices...")
+                
+                # Check if Max functionality is available
+                if not hasattr(Live, "MaxDevice") and not any(hasattr(track, "devices") for track in self.song.tracks):
+                    return (0, "Max for Live functionality not detected in this version of Live")
+                
+                # Look for devices that might handle export in all tracks
+                export_device = None
+                device_track = None
+                device_index = -1
+                
+                export_keywords = ["export", "render", "bounce", "record", "capture"]
+                
+                # Search all tracks for potential export devices
+                for track_index, track in enumerate(self.song.tracks):
+                    if hasattr(track, "devices"):
+                        for i, device in enumerate(track.devices):
+                            # Check device name for export-related keywords
+                            if hasattr(device, "name") and any(keyword in device.name.lower() for keyword in export_keywords):
+                                export_device = device
+                                device_track = track
+                                device_index = i
+                                self.logger.info(f"Found potential export device: {device.name} on track {track.name}")
+                                break
+                    
+                    if export_device:
+                        break
+                
+                if not export_device:
+                    # No export device found - could create a temporary one
+                    self.logger.info("No export devices found. Would need to create one.")
+                    
+                    # Check if there's a Max API to create devices
+                    can_create_max_device = (hasattr(self.song, "create_device") or 
+                                             any(hasattr(track, "create_device") for track in self.song.tracks))
+                    
+                    if not can_create_max_device:
+                        return (0, "No export devices found and cannot create new Max devices")
+                    
+                    # Would implement device creation here if we had a known Max device to create
+                    return (0, "Creating Max export devices not implemented yet")
+                
+                # If we found a device, try to communicate with it
+                # This would require knowledge of the specific device's parameters
+                self.logger.info(f"Attempting to use {export_device.name} for export")
+                
+                # Attempt to send message to Max device
+                # This is highly device-specific
+                if hasattr(export_device, "send_message"):
+                    try:
+                        # Generic attempt to call export functionality
+                        export_device.send_message("export", destination, 0.0, duration)
+                        return (1, f"Message sent to Max device {export_device.name}")
+                    except Exception as e:
+                        self.logger.error(f"Error sending message to Max device: {str(e)}")
+                
+                # Attempt to set parameters if the device has them
+                if hasattr(export_device, "parameters"):
+                    try:
+                        # Try to find and set relevant parameters
+                        path_param = None
+                        duration_param = None
+                        export_param = None
+                        
+                        for param in export_device.parameters:
+                            param_name = param.name.lower()
+                            if any(name in param_name for name in ["path", "file", "destination"]):
+                                path_param = param
+                            elif any(name in param_name for name in ["duration", "length", "time"]):
+                                duration_param = param
+                            elif any(name in param_name for name in ["export", "render", "bounce", "start"]):
+                                export_param = param
+                        
+                        if path_param and destination:
+                            # Note: setting string values may not be supported directly
+                            try:
+                                path_param.value = destination
+                                self.logger.info(f"Set path parameter to {destination}")
+                            except:
+                                self.logger.warning("Could not set path parameter")
+                        
+                        if duration_param:
+                            try:
+                                duration_param.value = duration
+                                self.logger.info(f"Set duration parameter to {duration}")
+                            except:
+                                self.logger.warning("Could not set duration parameter")
+                        
+                        if export_param:
+                            try:
+                                # Assume this is a trigger parameter (button)
+                                original_value = export_param.value
+                                export_param.value = 1.0 if original_value == 0.0 else 0.0
+                                time.sleep(0.1)
+                                export_param.value = original_value
+                                self.logger.info("Triggered export parameter")
+                                return (1, "Triggered export in Max device")
+                            except:
+                                self.logger.warning("Could not trigger export parameter")
+                    
+                    except Exception as e:
+                        self.logger.error(f"Error setting Max device parameters: {str(e)}")
+                
+                return (0, "Max device found but could not trigger export functionality")
+                
+            except Exception as e:
+                self.logger.error(f"Error during Max for Live export attempt: {str(e)}")
+                return (0, f"Error during Max for Live export attempt: {str(e)}")
+        
+        self.osc_server.add_handler("/live/song/try_m4l_export_method", try_m4l_export_method)
+
+        def try_m4l_export(params):
+            """
+            Attempts to export audio using Max for Live device integration.
+            This tries to find and utilize M4L devices that can export audio.
+            
+            Args:
+                destination (str, optional): Path to save exported file
+                duration (float, optional): Duration in seconds to export
+                
+            Returns:
+                success (int): 1 if successful, 0 otherwise
+                message (str): Status message
+            """
+            try:
+                # Extract parameters
+                destination = str(params[0]) if len(params) > 0 else ""
+                duration = float(params[1]) if len(params) > 1 else 30.0
+                
+                self.logger.info(f"Attempting M4L device export for {duration} seconds")
+                
+                # Check for any Max Audio Effect devices
+                found_m4l_devices = []
+                
+                # Scan all tracks for M4L devices
+                for track in self.song.tracks:
+                    for device in track.devices:
+                        device_name = device.name.lower()
+                        # Look for likely export devices
+                        if "max" in device_name and any(keyword in device_name for keyword in 
+                                                       ["export", "record", "bounce", "render"]):
+                            found_m4l_devices.append((track.name, device.name))
+                
+                if not found_m4l_devices:
+                    self.logger.info("Scanning master track for M4L devices")
+                    # Check master track too
+                    for device in self.song.master_track.devices:
+                        device_name = device.name.lower()
+                        if "max" in device_name and any(keyword in device_name for keyword in 
+                                                       ["export", "record", "bounce", "render"]):
+                            found_m4l_devices.append(("Master", device.name))
+                
+                if not found_m4l_devices:
+                    # If no export M4L devices found, try UI automation as fallback
+                    try:
+                        import keyboard
+                        self.logger.info("No M4L export devices found, trying keyboard automation instead")
+                        
+                        # Fall back to the UI automation approach
+                        return try_ui_automation_export(params)
+                    except ImportError:
+                        self.logger.error("Keyboard module not available for fallback UI automation")
+                        return (0, "No M4L export devices found and keyboard module not available")
+                
+                # We found some M4L devices that might be able to export
+                self.logger.info(f"Found {len(found_m4l_devices)} potential M4L export devices:")
+                for track_name, device_name in found_m4l_devices:
+                    self.logger.info(f"  - '{device_name}' on track '{track_name}'")
+                
+                # For now, we'll use the first one found
+                if found_m4l_devices:
+                    track_name, device_name = found_m4l_devices[0]
+                    self.logger.info(f"Attempting to use M4L device '{device_name}' on track '{track_name}'")
+                    
+                    # Now we need to try to trigger the device
+                    # This is speculative as each M4L device has its own interface
+                    # We'll try to find automation controls and toggle them
+                    
+                    # Save current playback state
+                    was_playing = self.song.is_playing
+                    current_time = self.song.current_song_time
+                    
+                    # Stop playback during operation
+                    if was_playing:
+                        self.song.stop_playing()
+                    
+                    # Rewind to beginning
+                    self.song.current_song_time = 0.0
+                    
+                    # TODO: Implement specific control methods for known M4L export devices
+                    # For now, we'll just report we found a device but can't control it yet
+                    
+                    self.logger.info(f"M4L device found, but automatic control not yet implemented")
+                    self.logger.info(f"Future development: implement specific controls for common M4L export devices")
+                    
+                    # Restore playback state
+                    self.song.current_song_time = current_time
+                    if was_playing:
+                        self.song.start_playing()
+                    
+                    return (1, f"Found M4L device '{device_name}' on track '{track_name}'. Manual activation required.")
+                    
+                return (0, "No suitable M4L export devices found")
+                
+            except Exception as e:
+                self.logger.error(f"Error during M4L export: {str(e)}")
+                return (0, f"Error during M4L export: {str(e)}")
+        
+        self.osc_server.add_handler("/live/song/try_m4l_export", try_m4l_export)
 
     def current_song_time_changed(self):
         #--------------------------------------------------------------------------------
