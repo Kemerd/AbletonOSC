@@ -178,6 +178,7 @@ class SongHandler(AbletonOSCHandler):
 
         def song_export_structure(params):
             tracks = []
+            # Process regular tracks
             for track_index, track in enumerate(self.song.tracks):
                 group_track = None
                 if track.group_track is not None:
@@ -187,16 +188,50 @@ class SongHandler(AbletonOSCHandler):
                     "name": track.name,
                     "is_foldable": track.is_foldable,
                     "group_track": group_track,
+                    "color": track.color,
+                    "has_audio_input": track.has_audio_input,
+                    "has_midi_input": track.has_midi_input,
+                    #"input_routing_type": track.input_routing_type.name if hasattr(track.input_routing_type, 'name') else str(track.input_routing_type),
+                    #"output_routing_type": track.output_routing_type.name if hasattr(track.output_routing_type, 'name') else str(track.output_routing_type),
+                    "panning": track.mixer_device.panning.value,
+                    "volume": track.mixer_device.volume.value,
                     "clips": [],
                     "devices": []
                 }
+                
+                # Add properties that might not exist on all track types (like Master or Return)
+                try:
+                    track_data["muted"] = track.mute
+                except (AttributeError, RuntimeError):
+                    track_data["muted"] = False
+                    
+                try:
+                    track_data["soloed"] = track.solo
+                except (AttributeError, RuntimeError):
+                    track_data["soloed"] = False
+                    
+                try:
+                    track_data["arm"] = track.arm
+                except (AttributeError, RuntimeError):
+                    track_data["arm"] = False
+                
                 for clip_index, clip_slot in enumerate(track.clip_slots):
                     if clip_slot.clip:
                         clip_data = {
                             "index": clip_index,
                             "name": clip_slot.clip.name,
                             "length": clip_slot.clip.length,
+                            "color": clip_slot.clip.color,
+                            "is_playing": clip_slot.clip.is_playing,
+                            "is_recording": clip_slot.clip.is_recording,
+                            "warping": clip_slot.clip.warping if hasattr(clip_slot.clip, 'warping') else None,
+                            "loop_start": clip_slot.clip.loop_start,
+                            "loop_end": clip_slot.clip.loop_end
                         }
+                        # Add audio-specific properties if it's an audio clip
+                        if hasattr(clip_slot.clip, 'gain'):
+                            clip_data["gain"] = clip_slot.clip.gain
+                            
                         track_data["clips"].append(clip_data)
 
                 for device_index, device in enumerate(track.devices):
@@ -204,19 +239,107 @@ class SongHandler(AbletonOSCHandler):
                         "class_name": device.class_name,
                         "type": device.type,
                         "name": device.name,
+                        "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                        "index": device_index,
                         "parameters": []
                     }
                     for parameter in device.parameters:
                         device_data["parameters"].append({
                             "name": parameter.name,
                             "value": parameter.value,
+                            "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
                             "min": parameter.min,
                             "max": parameter.max,
                             "is_quantized": parameter.is_quantized,
+                            "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                            "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
                         })
                     track_data["devices"].append(device_data)
 
                 tracks.append(track_data)
+                
+            # Add master track if available
+            if hasattr(self.song, "master_track"):
+                master_track = self.song.master_track
+                master_track_data = {
+                    "index": -1,  # Use -1 to indicate it's the master track
+                    "name": master_track.name,
+                    "is_master": True,
+                    "color": master_track.color if hasattr(master_track, 'color') else None,
+                    "has_audio_input": hasattr(master_track, 'has_audio_input') and master_track.has_audio_input,
+                    "has_midi_input": hasattr(master_track, 'has_midi_input') and master_track.has_midi_input,
+                    "panning": master_track.mixer_device.panning.value,
+                    "volume": master_track.mixer_device.volume.value,
+                    "devices": []
+                }
+                
+                # Add devices on the master track
+                for device_index, device in enumerate(master_track.devices):
+                    device_data = {
+                        "class_name": device.class_name,
+                        "type": device.type,
+                        "name": device.name,
+                        "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                        "index": device_index,
+                        "parameters": []
+                    }
+                    for parameter in device.parameters:
+                        device_data["parameters"].append({
+                            "name": parameter.name,
+                            "value": parameter.value,
+                            "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
+                            "min": parameter.min,
+                            "max": parameter.max,
+                            "is_quantized": parameter.is_quantized,
+                            "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                            "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
+                        })
+                    master_track_data["devices"].append(device_data)
+                
+                tracks.append(master_track_data)
+                
+            # Also add return tracks if available
+            if hasattr(self.song, "return_tracks"):
+                for return_index, return_track in enumerate(self.song.return_tracks):
+                    return_track_data = {
+                        "index": -(return_index + 2),  # Use negative indices starting from -2 for return tracks
+                        "name": return_track.name,
+                        "is_return": True,
+                        "color": return_track.color if hasattr(return_track, 'color') else None,
+                        "has_audio_input": hasattr(return_track, 'has_audio_input') and return_track.has_audio_input,
+                        "has_midi_input": hasattr(return_track, 'has_midi_input') and return_track.has_midi_input,
+                        #"input_routing_type": return_track.input_routing_type.name if hasattr(return_track, 'input_routing_type') and hasattr(return_track.input_routing_type, 'name') else str(return_track.input_routing_type) if hasattr(return_track, 'input_routing_type') else None,
+                        #"output_routing_type": return_track.output_routing_type.name if hasattr(return_track, 'output_routing_type') and hasattr(return_track.output_routing_type, 'name') else str(return_track.output_routing_type) if hasattr(return_track, 'output_routing_type') else None,
+                        "panning": return_track.mixer_device.panning.value,
+                        "volume": return_track.mixer_device.volume.value,
+                        "devices": []
+                    }
+                    
+                    # Add devices on the return track
+                    for device_index, device in enumerate(return_track.devices):
+                        device_data = {
+                            "class_name": device.class_name,
+                            "type": device.type,
+                            "name": device.name,
+                            "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                            "index": device_index,
+                            "parameters": []
+                        }
+                        for parameter in device.parameters:
+                            device_data["parameters"].append({
+                                "name": parameter.name,
+                                "value": parameter.value,
+                                "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
+                                "min": parameter.min,
+                                "max": parameter.max,
+                                "is_quantized": parameter.is_quantized,
+                                "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                                "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
+                            })
+                        return_track_data["devices"].append(device_data)
+                    
+                    tracks.append(return_track_data)
+                    
             song = {
                 "tracks": tracks
             }
@@ -2137,31 +2260,45 @@ class SongHandler(AbletonOSCHandler):
                     # Windows approach using PowerShell
                     self.logger.info("Using PowerShell SendKeys for Windows automation")
                     
+                    # Extract filename and folder path from destination
+                    import os
+                    filename = os.path.basename(destination) if destination else f"ableton_export_{int(time.time())}.wav"
+                    folder_path = os.path.dirname(destination) if destination else ""
+                    
+                    self.logger.info(f"Export filename: {filename}")
+                    self.logger.info(f"Export folder: {folder_path}")
+                    
                     # Trigger export dialog (Ctrl+Shift+R)
-                    export_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"^+r\"); Start-Sleep -m 2000;"'
+                    export_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("^+r"); Start-Sleep -m 2000;"'
                     
                     try:
                         # Execute the command
                         self.logger.info("Sending Ctrl+Shift+R keystroke to open export dialog")
                         subprocess.run(export_cmd, shell=True, check=True)
                         
-                        # Tab to navigate the dialog
-                        tab_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
-                        self.logger.info("Sending TAB keystrokes to navigate dialog")
-                        subprocess.run(tab_cmd, shell=True, check=True)
+                        # Type the WAV filename
+                        filename_cmd = fr'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("{filename}\"); Start-Sleep -m 1000;"'
+                        self.logger.info(f"Entering filename: {filename}")
+                        subprocess.run(filename_cmd, shell=True, check=True)
                         
-                        # If destination provided, try to enter it
-                        if destination:
-                            type_cmd = fr'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{destination}\"); Start-Sleep -m 1000;"'
-                            self.logger.info(f"Entering export path: {destination}")
-                            subprocess.run(type_cmd, shell=True, check=True)
+                        # Tab 7 times to get to folder path field
+                        tabs_to_folder_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
+                        self.logger.info("Tabbing 7 times to reach folder path field")
+                        subprocess.run(tabs_to_folder_cmd, shell=True, check=True)
                         
-                        # More tabs to get to OK button
-                        more_tabs_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
-                        subprocess.run(more_tabs_cmd, shell=True, check=True)
+                        # Type folder path if provided
+                        if folder_path:
+                            path_cmd = fr'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("{folder_path}\"); Start-Sleep -m 1000;"'
+                            self.logger.info(f"Entering folder path: {folder_path}")
+                            subprocess.run(path_cmd, shell=True, check=True)
+                        
+                        # Tab 9 more times to get to render button
+                        tabs_to_render_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}{TAB}\"); Start-Sleep -m 1000;"'
+                        self.logger.info("Tabbing 9 times to reach render button")
+                        subprocess.run(tabs_to_render_cmd, shell=True, check=True)
                         
                         # Press Enter to confirm
-                        enter_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate(\"Ableton Live\"); Start-Sleep -m 500; $wshell.SendKeys(\"{ENTER}\"); Start-Sleep -m 1000;"'
+                        enter_cmd = r'powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate("Ableton Live"); Start-Sleep -m 500; $wshell.SendKeys("{ENTER}\"); Start-Sleep -m 1000;"'
                         self.logger.info("Sending ENTER to confirm export")
                         subprocess.run(enter_cmd, shell=True, check=True)
                         
@@ -2436,15 +2573,9 @@ class SongHandler(AbletonOSCHandler):
                 
                 if not found_m4l_devices:
                     # If no export M4L devices found, try UI automation as fallback
-                    try:
-                        import keyboard
-                        self.logger.info("No M4L export devices found, trying keyboard automation instead")
-                        
-                        # Fall back to the UI automation approach
-                        return try_ui_automation_export(params)
-                    except ImportError:
-                        self.logger.error("Keyboard module not available for fallback UI automation")
-                        return (0, "No M4L export devices found and keyboard module not available")
+                    self.logger.info("No M4L export devices found, trying UI automation instead")
+                    # Fall back to the UI automation approach
+                    return try_ui_automation_export(params)
                 
                 # We found some M4L devices that might be able to export
                 self.logger.info(f"Found {len(found_m4l_devices)} potential M4L export devices:")
