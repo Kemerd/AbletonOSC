@@ -20,6 +20,15 @@ class AbletonOSCHandler(Component):
 
     def clear_api(self):
         self._clear_listeners()
+        
+        # Send a client notification that this component is being cleared
+        # This is useful for handlers that are being unloaded/shutdown
+        if hasattr(self, "class_identifier") and self.class_identifier:
+            try:
+                self.logger.info(f"Clearing API for {self.class_identifier}")
+                self.osc_server.send(f"/live/{self.class_identifier}/cleared", (1,))
+            except Exception as e:
+                self.logger.error(f"Error sending API cleared notification: {e}")
 
     #--------------------------------------------------------------------------------
     # Generic callbacks

@@ -11,6 +11,7 @@ import logging
 import traceback
 import threading
 import json
+import time
 
 class OSCServer:
     def __init__(self,
@@ -306,10 +307,27 @@ class OSCServer:
             self.logger.error("AbletonOSC: Error handling OSC message: %s" % e)
             self.logger.warning("AbletonOSC: %s" % traceback.format_exc())
 
+    def send_disconnect(self) -> None:
+        """
+        Send a disconnect signal to any connected clients before shutting down.
+        This allows clients to properly handle server disconnection.
+        """
+        try:
+            self.logger.info("Sending disconnect signal to clients")
+            # Send to the most recent client that connected
+            self.send("/live/connection/disconnected", (1,))
+            # Allow a small delay for the message to be sent before socket closure
+            time.sleep(0.1)
+        except Exception as e:
+            self.logger.error(f"Error sending disconnect signal: {e}")
+
     def shutdown(self) -> None:
         """
         Shutdown the server network sockets.
         """
+        # Send disconnect signal before closing sockets
+        self.send_disconnect()
+        
         # Close the UDP socket
         self._socket.close()
         

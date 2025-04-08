@@ -135,8 +135,17 @@ class Manager(ControlSurface):
     def disconnect(self):
         self.show_message("Disconnecting...")
         logger.info("Disconnecting...")
+        
+        # Clear APIs first - this will also send component-specific cleared messages
+        # Actually this is completely unnecessary, as the shutdown() method will do this anyway
+        # self.clear_api()
+        
+        # Stop logging
         self.stop_logging()
+        
+        # Shutdown the OSC server - this will send the disconnect signal
         self.osc_server.shutdown()
+        
         super().disconnect()
 
 
