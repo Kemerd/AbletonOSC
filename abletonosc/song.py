@@ -191,8 +191,6 @@ class SongHandler(AbletonOSCHandler):
                     "color": track.color,
                     "has_audio_input": track.has_audio_input,
                     "has_midi_input": track.has_midi_input,
-                    #"input_routing_type": track.input_routing_type.name if hasattr(track.input_routing_type, 'name') else str(track.input_routing_type),
-                    #"output_routing_type": track.output_routing_type.name if hasattr(track.output_routing_type, 'name') else str(track.output_routing_type),
                     "panning": track.mixer_device.panning.value,
                     "volume": track.mixer_device.volume.value,
                     "clips": [],
@@ -308,8 +306,6 @@ class SongHandler(AbletonOSCHandler):
                         "color": return_track.color if hasattr(return_track, 'color') else None,
                         "has_audio_input": hasattr(return_track, 'has_audio_input') and return_track.has_audio_input,
                         "has_midi_input": hasattr(return_track, 'has_midi_input') and return_track.has_midi_input,
-                        #"input_routing_type": return_track.input_routing_type.name if hasattr(return_track, 'input_routing_type') and hasattr(return_track.input_routing_type, 'name') else str(return_track.input_routing_type) if hasattr(return_track, 'input_routing_type') else None,
-                        #"output_routing_type": return_track.output_routing_type.name if hasattr(return_track, 'output_routing_type') and hasattr(return_track.output_routing_type, 'name') else str(return_track.output_routing_type) if hasattr(return_track, 'output_routing_type') else None,
                         "panning": return_track.mixer_device.panning.value,
                         "volume": return_track.mixer_device.volume.value,
                         "devices": []
@@ -356,6 +352,181 @@ class SongHandler(AbletonOSCHandler):
             fd.close()
             return (1,)
         self.osc_server.add_handler("/live/song/export/structure", song_export_structure)
+
+        # TCP handler for song structure
+        def song_structure_tcp_handler():
+            """
+            Returns the full song structure data over TCP.
+            This is the TCP equivalent of the /live/song/export/structure OSC command,
+            but returns the JSON data directly instead of writing to a temp file.
+            """
+            tracks = []
+            # Process regular tracks
+            for track_index, track in enumerate(self.song.tracks):
+                group_track = None
+                if track.group_track is not None:
+                    group_track = list(self.song.tracks).index(track.group_track)
+                track_data = {
+                    "index": track_index,
+                    "name": track.name,
+                    "is_foldable": track.is_foldable,
+                    "group_track": group_track,
+                    "color": track.color,
+                    "has_audio_input": track.has_audio_input,
+                    "has_midi_input": track.has_midi_input,
+                    "panning": track.mixer_device.panning.value,
+                    "volume": track.mixer_device.volume.value,
+                    "clips": [],
+                    "devices": []
+                }
+                
+                # Add properties that might not exist on all track types (like Master or Return)
+                try:
+                    track_data["muted"] = track.mute
+                except (AttributeError, RuntimeError):
+                    track_data["muted"] = False
+                    
+                try:
+                    track_data["soloed"] = track.solo
+                except (AttributeError, RuntimeError):
+                    track_data["soloed"] = False
+                    
+                try:
+                    track_data["arm"] = track.arm
+                except (AttributeError, RuntimeError):
+                    track_data["arm"] = False
+                
+                for clip_index, clip_slot in enumerate(track.clip_slots):
+                    if clip_slot.clip:
+                        clip_data = {
+                            "index": clip_index,
+                            "name": clip_slot.clip.name,
+                            "length": clip_slot.clip.length,
+                            "color": clip_slot.clip.color,
+                            "is_playing": clip_slot.clip.is_playing,
+                            "is_recording": clip_slot.clip.is_recording,
+                            "warping": clip_slot.clip.warping if hasattr(clip_slot.clip, 'warping') else None,
+                            "loop_start": clip_slot.clip.loop_start,
+                            "loop_end": clip_slot.clip.loop_end
+                        }
+                        # Add audio-specific properties if it's an audio clip
+                        if hasattr(clip_slot.clip, 'gain'):
+                            clip_data["gain"] = clip_slot.clip.gain
+                            
+                        track_data["clips"].append(clip_data)
+
+                for device_index, device in enumerate(track.devices):
+                    device_data = {
+                        "class_name": device.class_name,
+                        "type": device.type,
+                        "name": device.name,
+                        "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                        "index": device_index,
+                        "parameters": []
+                    }
+                    for parameter in device.parameters:
+                        device_data["parameters"].append({
+                            "name": parameter.name,
+                            "value": parameter.value,
+                            "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
+                            "min": parameter.min,
+                            "max": parameter.max,
+                            "is_quantized": parameter.is_quantized,
+                            "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                            "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
+                        })
+                    track_data["devices"].append(device_data)
+
+                tracks.append(track_data)
+                
+            # Add master track if available
+            if hasattr(self.song, "master_track"):
+                master_track = self.song.master_track
+                master_track_data = {
+                    "index": -1,  # Use -1 to indicate it's the master track
+                    "name": master_track.name,
+                    "is_master": True,
+                    "color": master_track.color if hasattr(master_track, 'color') else None,
+                    "has_audio_input": hasattr(master_track, 'has_audio_input') and master_track.has_audio_input,
+                    "has_midi_input": hasattr(master_track, 'has_midi_input') and master_track.has_midi_input,
+                    "panning": master_track.mixer_device.panning.value,
+                    "volume": master_track.mixer_device.volume.value,
+                    "devices": []
+                }
+                
+                # Add devices on the master track
+                for device_index, device in enumerate(master_track.devices):
+                    device_data = {
+                        "class_name": device.class_name,
+                        "type": device.type,
+                        "name": device.name,
+                        "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                        "index": device_index,
+                        "parameters": []
+                    }
+                    for parameter in device.parameters:
+                        device_data["parameters"].append({
+                            "name": parameter.name,
+                            "value": parameter.value,
+                            "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
+                            "min": parameter.min,
+                            "max": parameter.max,
+                            "is_quantized": parameter.is_quantized,
+                            "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                            "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
+                        })
+                    master_track_data["devices"].append(device_data)
+                
+                tracks.append(master_track_data)
+                
+            # Also add return tracks if available
+            if hasattr(self.song, "return_tracks"):
+                for return_index, return_track in enumerate(self.song.return_tracks):
+                    return_track_data = {
+                        "index": -(return_index + 2),  # Use negative indices starting from -2 for return tracks
+                        "name": return_track.name,
+                        "is_return": True,
+                        "color": return_track.color if hasattr(return_track, 'color') else None,
+                        "has_audio_input": hasattr(return_track, 'has_audio_input') and return_track.has_audio_input,
+                        "has_midi_input": hasattr(return_track, 'has_midi_input') and return_track.has_midi_input,
+                        "panning": return_track.mixer_device.panning.value,
+                        "volume": return_track.mixer_device.volume.value,
+                        "devices": []
+                    }
+                    
+                    # Add devices on the return track
+                    for device_index, device in enumerate(return_track.devices):
+                        device_data = {
+                            "class_name": device.class_name,
+                            "type": device.type,
+                            "name": device.name,
+                            "is_active": device.is_active if hasattr(device, 'is_active') else True,
+                            "index": device_index,
+                            "parameters": []
+                        }
+                        for parameter in device.parameters:
+                            device_data["parameters"].append({
+                                "name": parameter.name,
+                                "value": parameter.value,
+                                "normalized_value": parameter.value_normalized if hasattr(parameter, 'value_normalized') else None,
+                                "min": parameter.min,
+                                "max": parameter.max,
+                                "is_quantized": parameter.is_quantized,
+                                "is_enabled": parameter.is_enabled if hasattr(parameter, 'is_enabled') else True,
+                                "automation_state": parameter.automation_state if hasattr(parameter, 'automation_state') else None
+                            })
+                        return_track_data["devices"].append(device_data)
+                    
+                    tracks.append(return_track_data)
+                    
+            song = {
+                "tracks": tracks
+            }
+            
+            return song
+            
+        # Register the TCP handler for song structure
+        self.osc_server.add_tcp_handler("GET_SONG_STRUCTURE", song_structure_tcp_handler)
 
         #--------------------------------------------------------------------------------
         # Callbacks for freezing and rendering tracks
